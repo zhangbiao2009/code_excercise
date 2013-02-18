@@ -11,11 +11,17 @@ typedef struct Node{
 	struct Node* next;
 }Node;
 
-const int MAX_CACHE_SIZE = 1;
+const int MAX_CACHE_SIZE = 5;
 
 //circular doubly linked list
-static Node* head = NULL;
+static Node head;
 static map<int, Node*> cache;
+
+void list_init()
+{
+	head.key = head.val = 0;
+	head.prev = head.next = &head;
+}
 
 Node* new_node(int key, int val)
 {
@@ -36,9 +42,6 @@ Node* find(int key)
 
 void remove_from_list(Node* node)
 {
-	if(node == head){ //max cache size is only 1, remove the head from the list
-		head = NULL;
-	}
 	node->prev->next = node->next;
 	node->next->prev = node->prev;
 }
@@ -46,30 +49,16 @@ void remove_from_list(Node* node)
 //put it to the front
 void promote(Node* node)
 {
-	if(!head){ //first node
-		head=node;
-		return;
-	}
-
-	if(node == head)
-		return; //do nothing
-
-	if(node == head->prev){
-		head = head->prev;
-		return;
-	}
-
 	if(node->prev != node && node->next != node){
 		//not a new node, already in the list, remove it from the list
 		remove_from_list(node);
 	}
 
 	//insert node in the front
-	node->next = head;
-	node->prev = head->prev;
-	head->prev->next = node;
-	head->prev = node;
-	head = node;
+	node->next = head.next;
+	node->prev = &head;
+	node->prev->next = node;
+	node->next->prev = node;
 }
 
 void set(int key, int val)
@@ -79,7 +68,7 @@ void set(int key, int val)
 		node = new_node(key, val);
 		if(cache.size() >= MAX_CACHE_SIZE){
 			//evict an entry according to LRU policy (from list tail)
-			Node* tmp = head->prev;
+			Node* tmp = head.prev;
 			remove_from_list(tmp);
 			cache.erase(tmp->key);
 			delete tmp;
@@ -107,6 +96,7 @@ int main()
 {
 	string cmd;
 	int key, val;
+	list_init();
 	while(1){
 		cout<<"please input command:"<<endl;
 		cin>>cmd;
@@ -124,10 +114,7 @@ int main()
 			return 0;
 		}
 		cout<<"current cache status:"<<endl;
-		if(!head)
-			continue;
-		cout<<"("<<head->key<<", "<<head->val<<") ";
-		for(Node* np=head->next; np!=head; np=np->next){
+		for(Node* np=head.next; np!=&head; np=np->next){
 			cout<<"("<<np->key<<", "<<np->val<<") ";
 		}
 		cout<<endl;
