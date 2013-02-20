@@ -23,6 +23,7 @@ struct Link{
 };
 
 struct Node{
+	bool valid;
 	char* data;
 	Link next;
 };
@@ -144,10 +145,13 @@ void list_release(){
 char* node_encode(Node* np, size_t* size)
 {
 	int data_size = strlen(np->data)+1;
-	*size = data_size + sizeof(np->next.node_size) + sizeof(np->next.offset);
+	*size = sizeof(np->valid) + data_size 
+		+ sizeof(np->next.node_size) + sizeof(np->next.offset);
 
 	char* buf = (char*) Malloc(*size);
 	char* ptr = buf;
+	memcpy(ptr, &np->valid, sizeof(np->valid));	//写入结点的有效信息
+	ptr += sizeof(np->valid);
 	strcpy(ptr, np->data);
 	ptr += data_size;
 	memcpy(ptr, &np->next.node_size, sizeof(np->next.node_size));	//写入下一个结点的大小信息
@@ -159,16 +163,27 @@ char* node_encode(Node* np, size_t* size)
 Node* node_decode(char* buf)
 {
 	Node* np = (Node*)Malloc(sizeof(Node));
-	np->data = strdup(buf); /* 读取结点中的数据，C style string */
-
-	char* ptr = buf+strlen(np->data)+1;
+	char* ptr = buf;
+	memcpy(&np->valid, ptr, sizeof(np->valid));	//读取结点的有效信息
+	ptr += sizeof(np->valid);
+	np->data = strdup(ptr); /* 读取结点中的数据，C style string */
+	ptr += strlen(np->data)+1;
 	memcpy(&np->next.node_size, ptr, sizeof(np->next.node_size));	//读取下一个结点的大小信息
 	ptr += sizeof(np->next.node_size);
 	memcpy(&np->next.offset, ptr, sizeof(np->next.offset));	//读取下一个结点的offset信息
 	return np;
 }
 
-Node* read_node(Link lp)
+size_t node_size(Node* np)
+{
+	size_t sz = sizeof(np->valid);
+	sz += strlen(np->data)+1; //
+	sz += sizeof(np->next.node_size); //
+	sz += sizeof(np->next.offset); //
+	return sz;
+}
+
+Node* node_read(Link lp)
 {
 	char* buf = (char*)Malloc(lp.node_size);
 
@@ -179,6 +194,14 @@ Node* read_node(Link lp)
 	free(buf);
 
 	return np;
+}
+
+void node_write_inplace(Node* np, off_t offset)
+{
+	size_t size;
+	char* node_rep = node_encode(np, &size);
+	Lseek(fd, offset, SEEK_SET);
+	Write(fd, node_rep, size);
 }
 
 void node_free(Node* np)
@@ -192,30 +215,34 @@ void list_print()
 	Link p=head.first;
 	printf("current list:\n");
 	while(p.offset!=0){
-		Node* np = read_node(p);
-		printf("%s, ", np->data);
+		Node* np = node_read(p);
+		if(np->valid)
+			printf("%s, ", np->data);
 		p=np->next;
 		node_free(np);
 	}
 	printf("\n");
 }
 
+/*
 bool list_get(char* data)
 {
 	Link p=head.first;
 	while(p.offset!=0){
-		Node* np = read_node(p);
-		if(!strcmp(np->data, data))	//matched
+		Node* np = node_read(p);
+		if(np->valid && !strcmp(np->data, data))	//matched
 			return true;
 		p=np->next;
 		node_free(np);
 	}
 	return false;
 }
+*/
 
-void list_insert(const char* data)
+void list_add(const char* data)
 {
 	Node* np = (Node*)Malloc(sizeof(Node));
+	np->valid = true;
 	np->data = strdup(data);
 	np->next = head.first;
 	//write np 文件结尾， 返回写的offset
@@ -226,9 +253,7 @@ void list_insert(const char* data)
 	//新的链表第一个结点的offset
 	head.first.offset = offset;
 	//新的链表第一个结点的大小信息
-	head.first.node_size = strlen(np->data)+1; //
-	head.first.node_size += sizeof(np->next.node_size); //
-	head.first.node_size += sizeof(np->next.offset); //
+	head.first.node_size = node_size(np);
 
 	write_head();
 
@@ -236,12 +261,21 @@ void list_insert(const char* data)
 	free(node_rep);
 }
 
-/*
-void list_remove(char* data)
+bool list_del(const char* data)
 {
-	//Node* np = list_get(data);
+	Link p=head.first;
+	while(p.offset!=0){
+		Node* np = node_read(p);
+		if(np->valid && !strcmp(np->data, data)){	//matched
+			np->valid = false;
+			node_write_inplace(np, p.offset);
+			return true;
+		}
+		p=np->next;
+		node_free(np);
+	}
+	return false;
 }
-*/
 
 int main()
 {
@@ -255,10 +289,10 @@ int main()
 		cin>>cmd;
 		if(cmd == "add"){
 			cin>>data;
-			list_insert(data.c_str());
+			list_add(data.c_str());
 		}else if(cmd == "del"){
 			cin>>data;
-			//list_remove(data.c_str());
+			list_del(data.c_str());
 		}
 		else{
 			return 0;
