@@ -118,11 +118,17 @@ bool list_init(char* file)
 	   */
 	if(access(file, F_OK) < 0){
 		fd = open(file, O_CREAT|O_RDWR, 0644);
-		if(fd<0)
-			return false;
+		if(fd<0){
+			perror("open");
+			exit(1);
+		}
 		write_head(); //是否要把新建的head写入到文件？？写入。
 	}else{
 		fd = open(file, O_RDWR);
+		if(fd<0){
+			perror("open");
+			exit(1);
+		}
 		//读取头结点信息
 		read_head();
 	}
