@@ -31,33 +31,84 @@ struct Head{
 	Link first;
 };
 static Head head;
+size_t head_size = sizeof(head.first.node_size) + sizeof(head.first.offset);
 static int fd=-1;
 
-
-char* head_encode(Head* headp, size_t* size)
+off_t Lseek(int fd, off_t offset, int whence)
 {
-	size_t head_size = sizeof(headp->first.node_size) + sizeof(headp->first.offset);
-	char* buf = (char*) malloc(head_size);
+	off_t off;
+	if((off = lseek(fd, offset, whence)) < 0){
+		perror("lseek");
+		exit(1);
+	}
+	return off;
+}
+
+ssize_t Read(int fd, void *buf, size_t count)
+{
+	ssize_t size;
+	if((size = read(fd, buf, count)) < 0){
+		perror("read");
+		exit(1);
+	}
+	return size;
+}
+
+ssize_t Write(int fd, const void *buf, size_t count)
+{
+	ssize_t size;
+	if((size = write(fd, buf, count)) < 0){
+		perror("write");
+		exit(1);
+	}
+	return size;
+}
+
+void *Malloc(size_t size)
+{
+	void * ptr = malloc(size);
+	if(!ptr){
+		fprintf(stderr, "not enough memory\n");
+		exit(1);
+	}
+	return ptr;
+}
+
+char* head_encode(Head* headp)
+{
+	char* buf = (char*) Malloc(head_size);
 	char* ptr = buf;
 	memcpy(ptr, &headp->first.node_size, sizeof(headp->first.node_size));	//写入下一个结点的大小信息
 	ptr += sizeof(headp->first.node_size);
 	memcpy(ptr, &headp->first.offset, sizeof(headp->first.offset));	//写入下一个结点的offset信息
-	*size = head_size;
 	return buf;
 }
 
-Head* head_decode(char* buf)
+void head_decode(char* buf)
 {
+	char* ptr = buf;
+	memcpy(&head.first.node_size, ptr, sizeof(head.first.node_size));	//写入下一个结点的大小信息
+	ptr += sizeof(head.first.node_size);
+	memcpy(&head.first.offset, ptr, sizeof(head.first.offset));	//写入下一个结点的offset信息
 }
 
 //把head写入文件
 void write_head()
 {
-	size_t size;
-	char* head_rep = head_encode(&head, &size);
-	lseek(fd, 0, SEEK_SET);
-	write(fd, head_rep, size);
+	char* head_rep = head_encode(&head);
+	Lseek(fd, 0, SEEK_SET);
+	Write(fd, head_rep, head_size);
 	free(head_rep);
+}
+
+//从文件中读取头部信息
+void read_head()
+{
+	char* buf = (char*)Malloc(head_size);
+	Lseek(fd, 0, SEEK_SET);
+	Read(fd, buf, head_size);
+	head_decode(buf);
+	free(buf);
 }
 
 bool list_init(char* file)
@@ -71,11 +122,9 @@ bool list_init(char* file)
 			return false;
 		write_head(); //是否要把新建的head写入到文件？？写入。
 	}else{
-		/* to do...
 		fd = open(file, O_RDWR);
 		//读取头结点信息
-		head = read();
-		*/
+		read_head();
 	}
 
 	return fd<0? false:true;
@@ -91,7 +140,7 @@ char* node_encode(Node* np, size_t* size)
 	int data_size = strlen(np->data)+1;
 	*size = data_size + sizeof(np->next.node_size) + sizeof(np->next.offset);
 
-	char* buf = (char*) malloc(*size);
+	char* buf = (char*) Malloc(*size);
 	char* ptr = buf;
 	strcpy(ptr, np->data);
 	ptr += data_size;
@@ -103,7 +152,7 @@ char* node_encode(Node* np, size_t* size)
 
 Node* node_decode(char* buf)
 {
-	Node* np = (Node*)malloc(sizeof(Node));
+	Node* np = (Node*)Malloc(sizeof(Node));
 	np->data = strdup(buf); /* 读取结点中的数据，C style string */
 
 	char* ptr = buf+strlen(np->data)+1;
@@ -115,17 +164,11 @@ Node* node_decode(char* buf)
 
 Node* read_node(Link lp)
 {
-	char* buf = (char*)malloc(lp.node_size);
+	char* buf = (char*)Malloc(lp.node_size);
 
-	if(lseek(fd, lp.offset, SEEK_SET)<0){
-		perror("lseek");
-		exit(0);
-	}
+	Lseek(fd, lp.offset, SEEK_SET);
 
-	if(read(fd, buf, lp.node_size) < 0){ //至此，结点中的内容在buf里
-		perror("read");
-		exit(0);
-	}
+	Read(fd, buf, lp.node_size); //至此，结点中的内容在buf里
 	Node* np = node_decode(buf);
 	free(buf);
 
@@ -166,14 +209,14 @@ bool list_get(char* data)
 
 void list_insert(const char* data)
 {
-	Node* np = (Node*)malloc(sizeof(Node));
+	Node* np = (Node*)Malloc(sizeof(Node));
 	np->data = strdup(data);
 	np->next = head.first;
 	//write np 文件结尾， 返回写的offset
 	size_t size;
 	char* node_rep = node_encode(np, &size);
-	off_t offset = lseek(fd, 0, SEEK_END);
-	write(fd, node_rep, size);
+	off_t offset = Lseek(fd, 0, SEEK_END);
+	Write(fd, node_rep, size);
 	//新的链表第一个结点的offset
 	head.first.offset = offset;
 	//新的链表第一个结点的大小信息
