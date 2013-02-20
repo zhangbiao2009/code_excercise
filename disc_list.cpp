@@ -224,6 +224,11 @@ void list_print()
 	printf("\n");
 }
 
+//copy list to another file, only valid nodes are copied.
+void list_copy()
+{
+}
+
 /*
 bool list_get(char* data)
 {
