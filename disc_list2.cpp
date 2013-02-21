@@ -102,14 +102,16 @@ class Node{
 		static char* Encode(Node* np)
 		{
 			const char* data = np->data_.c_str();
-			int data_size = strlen(data)+1;
+			int data_len = strlen(data);
 			char* buf = new char[np->Size()];
 
 			char* ptr = buf;
 			memcpy(ptr, &np->valid_, sizeof(np->valid_));	//写入结点的有效信息
 			ptr += sizeof(np->valid_);
-			strcpy(ptr, data);
-			ptr += data_size;
+			memcpy(ptr, &data_len, sizeof(data_len));	//写入data长度信息
+			ptr += sizeof(data_len);
+			memcpy(ptr, data, data_len);	//写入data
+			ptr += data_len;
 			memcpy(ptr, &np->next_.node_size, sizeof(np->next_.node_size));	//写入下一个结点的大小信息
 			ptr += sizeof(np->next_.node_size);
 			memcpy(ptr, &np->next_.offset, sizeof(np->next_.offset));	//写入下一个结点的offset信息
@@ -121,10 +123,14 @@ class Node{
 		{
 			Node* np = new Node;
 			char* ptr = buf;
+			int data_len;
+
 			memcpy(&np->valid_, ptr, sizeof(np->valid_));	//读取结点的有效信息
 			ptr += sizeof(np->valid_);
-			np->data_ = ptr; /* 读取结点中的数据，C style string */
-			ptr += strlen(ptr)+1;
+			memcpy(&data_len, ptr, sizeof(data_len));	//读取data长度信息
+			ptr += sizeof(data_len);
+			np->data_ = string(ptr, data_len); // 读取data
+			ptr += data_len;
 			memcpy(&np->next_.node_size, ptr, sizeof(np->next_.node_size));	//读取下一个结点的大小信息
 			ptr += sizeof(np->next_.node_size);
 			memcpy(&np->next_.offset, ptr, sizeof(np->next_.offset));	//读取下一个结点的offset信息
@@ -134,7 +140,8 @@ class Node{
 		size_t Size()
 		{
 			size_t sz = sizeof(valid_);
-			sz += strlen(data_.c_str())+1; //
+			sz += sizeof(int);	//data长度信息
+			sz += strlen(data_.c_str()); //data本身的大小
 			sz += sizeof(next_.node_size); //
 			sz += sizeof(next_.offset); //
 			return sz;
