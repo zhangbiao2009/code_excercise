@@ -233,48 +233,6 @@ class DiscList{
 			fd_ = -1;
 		}
 
-		Node* NodeRead(Link lp)
-		{
-			char* buf = new char[lp.node_size];
-
-			Lseek(fd_, lp.offset, SEEK_SET);
-
-			Read(fd_, buf, lp.node_size); //至此，结点中的内容在buf里
-			Node* np = Node::Decode(buf);
-			delete[] buf;
-
-			return np;
-		}
-
-		//把header写入文件
-		void HeaderWrite()
-		{
-			char* header_rep = Header::Encode(hp_);
-			Lseek(fd_, 0, SEEK_SET);
-			Write(fd_, header_rep, Header::Size());
-			free(header_rep);
-		}
-
-		//从文件中读取头部信息
-		void HeaderRead()
-		{
-			size_t sz = Header::Size();
-			char* buf = new char[sz];
-			Lseek(fd_, 0, SEEK_SET);
-			Read(fd_, buf, sz);
-			hp_ = Header::Decode(buf);
-			
-			delete[] buf;
-		}
-
-		void NodeWriteInplace(Node* np, off_t offset)
-		{
-			char* node_rep = Node::Encode(np);
-			Lseek(fd_, offset, SEEK_SET);
-			Write(fd_, node_rep, np->Size());
-			delete node_rep;
-		}
-
 		void Print()
 		{
 			Link p=hp_->GetFirst();
@@ -290,8 +248,16 @@ class DiscList{
 		}
 
 		//copy list to another file, only valid nodes are copied.
-		void Copy()
+		void Copy(DiscList& dest)
 		{
+			Link p=hp_->GetFirst();
+			while(!p.IsNull()){
+				Node* np = NodeRead(p);
+				if(np->IsValid())
+					dest.Add(np->GetData());
+				p=np->Next();
+				delete np;
+			}
 		}
 
 		/*
@@ -340,6 +306,49 @@ class DiscList{
 		}
 
 	private:
+
+		Node* NodeRead(Link lp)
+		{
+			char* buf = new char[lp.node_size];
+
+			Lseek(fd_, lp.offset, SEEK_SET);
+
+			Read(fd_, buf, lp.node_size); //至此，结点中的内容在buf里
+			Node* np = Node::Decode(buf);
+			delete[] buf;
+
+			return np;
+		}
+
+		//把header写入文件
+		void HeaderWrite()
+		{
+			char* header_rep = Header::Encode(hp_);
+			Lseek(fd_, 0, SEEK_SET);
+			Write(fd_, header_rep, Header::Size());
+			free(header_rep);
+		}
+
+		//从文件中读取头部信息
+		void HeaderRead()
+		{
+			size_t sz = Header::Size();
+			char* buf = new char[sz];
+			Lseek(fd_, 0, SEEK_SET);
+			Read(fd_, buf, sz);
+			hp_ = Header::Decode(buf);
+			
+			delete[] buf;
+		}
+
+		void NodeWriteInplace(Node* np, off_t offset)
+		{
+			char* node_rep = Node::Encode(np);
+			Lseek(fd_, offset, SEEK_SET);
+			Write(fd_, node_rep, np->Size());
+			delete node_rep;
+		}
+
 		Header* hp_;
 		string file_;
 		int fd_;
@@ -349,11 +358,18 @@ class DiscList{
 int main()
 {
 	string cmd, data;
-	DiscList l("mylist");
+	DiscList l("mylist"), dest("mylist.new");
 
 	if(!l.Open()){
 		cerr<<"db open failed:"<<endl;
 	}
+
+	/*
+	dest.Open();
+	l.Copy(dest);
+	dest.Close();
+	return 0;
+	*/
 
 	while(1){
 		cout<<"please input command:"<<endl;
@@ -364,6 +380,7 @@ int main()
 		}else if(cmd == "del"){
 			cin>>data;
 			l.Del(data);
+		}else if(cmd == "show"){
 		}
 		else{
 			return 0;
