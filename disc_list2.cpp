@@ -15,12 +15,6 @@ using namespace std;
    一个磁盘上的list
  */
 
-/*
-读取：
-先读入一个固定大小的结构，其中包含必要的元信息，从元信息中得到长度信息，再读入。
-*/
-
-
 int Open(const char *pathname, int flags)
 {
 	int ret;
