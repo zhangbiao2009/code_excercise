@@ -2,18 +2,35 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-
 #include <string>
 #include <iostream>
 
 using namespace std;
 
 /*
-   一个磁盘上的list
+   一个简单的key value DB
  */
+
+/*
+读取：
+先读入一个固定大小的结构，其中包含必要的元信息，从元信息中得到长度信息，再读入。
+*/
+
+static const int HASH_TABLE_SIZE = 4993;	//一个素数
+static const int MAX_KEY_SIZE = 1024;
+static const int MAX_VAL_SIZE = 1024*1024;
+
+struct hash_entry{
+	int entry_size;
+	off_t record_offset;	//record offset in data file
+	size_t record_size;	//record size
+	bool deleted;			//这条记录是正在使用，还是已经被标记为删除？
+	char* key;
+};
 
 int Open(const string& pathname, int flags)
 {
@@ -218,56 +235,36 @@ class Header{
 		Link first_;
 };
 
-class DiscList{
+class DList{
 	public:
-		DiscList(const string& name):name_(name){}
-		DiscList(){}
-		~DiscList(){}
+		DList(){}
+		~DList(){}
 
-		bool Open()
+		
+
+		void Init(int idx_fd, int data_fd, off_t offset)
 		{
-			/* 先看文件是否存在，如果存在就假定它的格式是正确的,读取头部元数据;
-			   如果不存在，则是新建文件，按照disc list的办法格式化之
-			 */
-			string idx_file_name = name_+".idx";
-			string data_file_name = name_+".data";
-
-			if(access(data_file_name.c_str(), F_OK) < 0){
-				idx_fd_ = ::Open(idx_file_name, O_CREAT|O_RDWR, 0644);
-				data_fd_ = ::Open(data_file_name, O_CREAT|O_RDWR, 0644);
-				HeaderWrite();	//是否要把新建的header写入到文件？？写入。
-			}else{
-				idx_fd_ = ::Open(idx_file_name, O_RDWR);
-				data_fd_ = ::Open(data_file_name, O_RDWR);
-				//读取头部信息
-				HeaderRead();
-			}
-
-			return true;
-		}
-
-		void Init(int fd, off_t offset)
-		{
-			idx_fd_ = fd;
+			idx_fd_ = idx_fd;
+			data_fd_ = data_fd;
 			header_offset_ = offset;
 		}
 
-		void Close()
+			
+
+		bool Empty()
 		{
-			close(idx_fd_);
-			close(data_fd_);
-			idx_fd_ = data_fd_ = -1;
+			Link l = header_.GetFirst();
+			return l.IsNull();
 		}
 
 		void Print()
 		{
-			Link p=header_.GetFirst();
-			cout<<"current list:"<<endl;
-			while(!p.IsNull()){
-				Node* np = NodeRead(p);
+			Link l=header_.GetFirst();
+			while(!l.IsNull()){
+				Node* np = NodeRead(l);
 				if(np->IsValid())
 					cout<<"("<<np->GetKey()<<", "<<GetVal(np->GetValLink())<<") ";
-				p=np->GetNext();
+				l=np->GetNext();
 				delete np;
 			}
 			cout<<endl;
@@ -275,7 +272,7 @@ class DiscList{
 
 		//copy list to another file, only valid nodes are copied.
 		/*
-		void Copy(DiscList& dest)
+		void Copy(DList& dest)
 		{
 			Link p=header_.GetFirst();
 			while(!p.IsNull()){
@@ -376,6 +373,27 @@ class DiscList{
 			return true;
 		}
 
+		//把header写入文件
+		void HeaderWrite()
+		{
+			char* header_rep = Header::Encode(&header_);
+			Lseek(idx_fd_, header_offset_, SEEK_SET);
+			Write(idx_fd_, header_rep, Header::Size());
+			delete[] header_rep;
+		}
+
+		//从文件中读取头部信息
+		void HeaderRead()
+		{
+			size_t sz = Header::Size();
+			char* buf = new char[sz];
+			Lseek(idx_fd_, header_offset_, SEEK_SET);
+			Read(idx_fd_, buf, sz);
+			Header::Decode(&header_, buf);
+			
+			delete[] buf;
+		}
+
 		string GetVal(Link l)
 		{
 			char* buf = new char[l.size];
@@ -400,27 +418,6 @@ class DiscList{
 			return np;
 		}
 
-		//把header写入文件
-		void HeaderWrite()
-		{
-			char* header_rep = Header::Encode(&header_);
-			Lseek(idx_fd_, 0, SEEK_SET);
-			Write(idx_fd_, header_rep, Header::Size());
-			delete[] header_rep;
-		}
-
-		//从文件中读取头部信息
-		void HeaderRead()
-		{
-			size_t sz = Header::Size();
-			char* buf = new char[sz];
-			Lseek(idx_fd_, 0, SEEK_SET);
-			Read(idx_fd_, buf, sz);
-			Header::Decode(&header_, buf);
-			
-			delete[] buf;
-		}
-
 		void NodeWriteInplace(Node* np, off_t offset)
 		{
 			char* node_rep = Node::Encode(np);
@@ -431,47 +428,128 @@ class DiscList{
 
 		Header header_;
 		off_t header_offset_;
-		string name_;
 		int idx_fd_;
 		int data_fd_;
+};
+
+
+
+class DB{
+	public:
+		DB(){
+			list_arr_ = new DList[HASH_TABLE_SIZE];
+		}
+		~DB() {
+			Close();
+			delete[] list_arr_;
+		}
+
+		bool Open(const string& dbname)
+		{
+			string idx_file_name = dbname+".idx";
+			string data_file_name = dbname+".data";
+
+			if(access(data_file_name.c_str(), F_OK) < 0){	//file not exist
+				idx_fd_ = ::Open(idx_file_name.c_str(), O_CREAT|O_RDWR, 0644);
+				data_fd_ = ::Open(data_file_name.c_str(), O_CREAT|O_RDWR, 0644);
+
+				for(int i=0; i<HASH_TABLE_SIZE; i++){
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Header::Size());
+					list_arr_[i].HeaderWrite();
+				}
+			}else{
+				idx_fd_ = ::Open(idx_file_name.c_str(), O_RDWR);
+				data_fd_ = ::Open(data_file_name.c_str(), O_RDWR);
+
+				//read list headers from file;
+				char* buf = new char[Header::Size()];
+				for(int i=0; i<HASH_TABLE_SIZE; i++){
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Header::Size());
+					list_arr_[i].HeaderRead();
+				}
+				delete[] buf;
+			}
+
+			return true;
+		}
+
+		void Close(){
+			close(idx_fd_);
+			close(data_fd_);
+			idx_fd_ = data_fd_ = -1;
+		}
+
+		bool Add(const string& key, const string& val){
+			//先查找，如果记录已经存在，则返回添加失败，暂不支持修改操作
+			//直接加入到data文件最后
+			//然后根据hash值，找到对应的位置，更新idx文件
+			int h = hash(key.c_str());
+			return list_arr_[h].Add(key, val);
+		}
+		bool Del(const string& key){
+			//先查找，如果记录不存在则直接返回失败，否则mark为deleted，不做记录移动
+			int h = hash(key.c_str());
+			return list_arr_[h].Del(key);
+		}
+		/*
+		const string& Get(const string& key){
+			//返回对应key的val，如果不存在则返回NULL
+			int h = hash(key.c_str());
+			return list_arr_[h].Get(key);
+		}*/
+		void Print(){
+				for(int i=0; i<HASH_TABLE_SIZE; i++){
+					if(!list_arr_[i].Empty()){
+						cout<<"list "<<i<<": ";
+						list_arr_[i].Print();
+					}
+				}
+		}
+	private:
+		int hash(const char* str)
+		{
+			int h = 0;
+			for(const char* p = str; *p!= '\0'; p++){
+				h = (31*h+*p)%HASH_TABLE_SIZE;
+			}
+			return h;
+
+		}
+
+		int idx_fd_;
+		int data_fd_;
+		DList* list_arr_;
 };
 
 
 int main()
 {
 	string cmd, key, val;
-	DiscList l("mylist");
 
-	if(!l.Open()){
+	DB db;
+	if(!db.Open("mydb")){
 		cerr<<"db open failed:"<<endl;
+		return 0;
 	}
-
-	/*
-	dest.Open();
-	l.Copy(dest);
-	dest.Close();
-	return 0;
-	*/
-
 	while(1){
 		cout<<"please input command:"<<endl;
 		cin>>cmd;
 		if(cmd == "add"){
 			cin>>key>>val;
-			if(!l.Add(key, val))
+			if(!db.Add(key, val))
 				cout << "already exist" <<endl;
 		}else if(cmd == "del"){
 			cin>>key;
-			l.Del(key);
+			db.Del(key);
 		}else if(cmd == "show"){
 		}
 		else{
 			return 0;
 		}
-		l.Print();
+		db.Print();
 	}
 
-	l.Close();
+	db.Close();
 
 	return 0;
 }
