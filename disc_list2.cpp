@@ -15,20 +15,20 @@ using namespace std;
    一个磁盘上的list
  */
 
-int Open(const char *pathname, int flags)
+int Open(const string& pathname, int flags)
 {
 	int ret;
-	if((ret = open(pathname, flags)) < 0){
+	if((ret = open(pathname.c_str(), flags)) < 0){
 		perror("open");
 		exit(1);
 	}
 	return ret;
 }
 
-int Open(const char *pathname, int flags, mode_t mode)
+int Open(const string& pathname, int flags, mode_t mode)
 {
 	int ret;
-	if((ret = open(pathname, flags, mode)) < 0){
+	if((ret = open(pathname.c_str(), flags, mode)) < 0){
 		perror("open");
 		exit(1);
 	}
@@ -76,27 +76,27 @@ void *Malloc(size_t size)
 }
 
 struct Link{
-	size_t node_size;
+	size_t size;
 	off_t offset;	 //offset为0为结尾
 
 	Link(size_t ns, off_t os)
-		:node_size(ns),offset(os){}
+		:size(ns),offset(os){}
 	Link()
-		:node_size(0),offset(0){}
+		:size(0),offset(0){}
 
 	static void Encode(char* buf, Link l)
 	{
 		char* ptr = buf;
-		memcpy(ptr, &l.node_size, sizeof(l.node_size));	//写入下一个结点的大小信息
-		ptr += sizeof(l.node_size);
+		memcpy(ptr, &l.size, sizeof(l.size));	//写入下一个结点的大小信息
+		ptr += sizeof(l.size);
 		memcpy(ptr, &l.offset, sizeof(l.offset));	//写入下一个结点的offset信息
 	}
 
 	static void Decode(Link* lp, char* buf)
 	{
 		char* ptr = buf;
-		memcpy(&lp->node_size, ptr, sizeof(lp->node_size));	//读取下一个结点的大小信息
-		ptr += sizeof(lp->node_size);
+		memcpy(&lp->size, ptr, sizeof(lp->size));	//读取下一个结点的大小信息
+		ptr += sizeof(lp->size);
 		memcpy(&lp->offset, ptr, sizeof(lp->offset));	//读取下一个结点的offset信息
 	}
 
@@ -108,8 +108,8 @@ struct Link{
 
 class Node{
 	public:
-		Node(bool valid, const string& key, const Link& next)
-			:valid_(valid), key_(key), next_(next){}
+		Node(bool valid, const string& key, const Link& val_link, const Link& next)
+			:valid_(valid), key_(key), val_link_(val_link), next_(next){}
 		~Node(){}
 
 		static char* Encode(Node* np)
@@ -125,6 +125,8 @@ class Node{
 			ptr += sizeof(key_len);
 			memcpy(ptr, key, key_len);	//写入key
 			ptr += key_len;
+			Link::Encode(ptr, np->val_link_);
+			ptr += Link::Size();
 			Link::Encode(ptr, np->next_);
 			ptr += Link::Size();
 
@@ -143,6 +145,8 @@ class Node{
 			ptr += sizeof(key_len);
 			np->key_ = string(ptr, key_len); // 读取key
 			ptr += key_len;
+			Link::Decode(&np->val_link_, ptr);
+			ptr += Link::Size();
 			Link::Decode(&np->next_, ptr);
 			ptr += Link::Size();
 
@@ -154,8 +158,8 @@ class Node{
 			size_t sz = sizeof(valid_);
 			sz += sizeof(int);	//key长度信息
 			sz += strlen(key_.c_str()); //key本身的大小
-			sz += sizeof(next_.node_size); //
-			sz += sizeof(next_.offset); //
+			sz += Link::Size(); //val_link_
+			sz += Link::Size(); //next_
 			return sz;
 		}
 
@@ -164,6 +168,7 @@ class Node{
 		bool IsValid(){return valid_;} 
 		void SetValid(bool v) {valid_ = v;}
 		string GetKey() {return key_;}
+		Link GetValLink() { return val_link_; }
 
 	private:
 		Node(){}
@@ -185,8 +190,8 @@ class Header{
 		{
 			char* buf = new char[Size()];
 			char* ptr = buf;
-			memcpy(ptr, &hp->first_.node_size, sizeof(hp->first_.node_size));	//写入下一个结点的大小信息
-			ptr += sizeof(hp->first_.node_size);
+			memcpy(ptr, &hp->first_.size, sizeof(hp->first_.size));	//写入下一个结点的大小信息
+			ptr += sizeof(hp->first_.size);
 			memcpy(ptr, &hp->first_.offset, sizeof(hp->first_.offset));	//写入下一个结点的offset信息
 			return buf;
 		}
@@ -194,8 +199,8 @@ class Header{
 		static Header* Decode(Header* hp, char* buf)
 		{
 			char* ptr = buf;
-			memcpy(&hp->first_.node_size, ptr, sizeof(hp->first_.node_size));	//写入下一个结点的大小信息
-			ptr += sizeof(hp->first_.node_size);
+			memcpy(&hp->first_.size, ptr, sizeof(hp->first_.size));	//写入下一个结点的大小信息
+			ptr += sizeof(hp->first_.size);
 			memcpy(&hp->first_.offset, ptr, sizeof(hp->first_.offset));	//写入下一个结点的offset信息
 			return hp;
 		}
@@ -206,7 +211,7 @@ class Header{
 		}
 
 		void SetFirst(Link l){
-			first_.node_size = l.node_size;
+			first_.size = l.size;
 			first_.offset = l.offset;
 		}
 	private:
@@ -215,7 +220,7 @@ class Header{
 
 class DiscList{
 	public:
-		DiscList(const string& file):file_(file){}
+		DiscList(const string& name):name_(name){}
 		DiscList(){}
 		~DiscList(){}
 
@@ -224,12 +229,16 @@ class DiscList{
 			/* 先看文件是否存在，如果存在就假定它的格式是正确的,读取头部元数据;
 			   如果不存在，则是新建文件，按照disc list的办法格式化之
 			 */
-			const char* file = file_.c_str();
-			if(access(file, F_OK) < 0){
-				idx_fd_ = ::Open(file, O_CREAT|O_RDWR, 0644);
+			string idx_file_name = name_+".idx";
+			string data_file_name = name_+".data";
+
+			if(access(data_file_name.c_str(), F_OK) < 0){
+				idx_fd_ = ::Open(idx_file_name, O_CREAT|O_RDWR, 0644);
+				data_fd_ = ::Open(data_file_name, O_CREAT|O_RDWR, 0644);
 				HeaderWrite();	//是否要把新建的header写入到文件？？写入。
 			}else{
-				idx_fd_ = ::Open(file, O_RDWR);
+				idx_fd_ = ::Open(idx_file_name, O_RDWR);
+				data_fd_ = ::Open(data_file_name, O_RDWR);
 				//读取头部信息
 				HeaderRead();
 			}
@@ -246,7 +255,8 @@ class DiscList{
 		void Close()
 		{
 			close(idx_fd_);
-			idx_fd_ = -1;
+			close(data_fd_);
+			idx_fd_ = data_fd_ = -1;
 		}
 
 		void Print()
@@ -256,7 +266,7 @@ class DiscList{
 			while(!p.IsNull()){
 				Node* np = NodeRead(p);
 				if(np->IsValid())
-					cout<<np->GetKey()<<", ";
+					cout<<"("<<np->GetKey()<<", "<<GetVal(np->GetValLink())<<") ";
 				p=np->GetNext();
 				delete np;
 			}
@@ -264,6 +274,7 @@ class DiscList{
 		}
 
 		//copy list to another file, only valid nodes are copied.
+		/*
 		void Copy(DiscList& dest)
 		{
 			Link p=header_.GetFirst();
@@ -274,7 +285,7 @@ class DiscList{
 				p=np->GetNext();
 				delete np;
 			}
-		}
+		}*/
 
 		bool Find(const string& key, Node** npp = NULL, Link* lp = NULL, 
 				Node** prev_npp = NULL, Link* prev_lp = NULL)
@@ -310,20 +321,19 @@ class DiscList{
 			return false;
 		}
 
-		bool Add(const string& key/*, const string& val*/)
+		bool Add(const string& key, const string& val)
 		{
 			if(Find(key))	//alread exist
 				return false;
 
 			off_t offset;
 
-			/*
 			//write data to the end of data file
 			offset = Lseek(data_fd_, 0, SEEK_END);
-			Write(data_fd_, val.c_ptr(), val.length());
+			Write(data_fd_, val.c_str(), val.length());
 			Link val_link(val.length(), offset);
-			*/
-			Node n(true, key, /*val_link,*/ header_.GetFirst());
+
+			Node n(true, key, val_link, header_.GetFirst());
 			char* node_rep = Node::Encode(&n);
 			//在文件结尾写入新的结点，并更新头结点信息
 			offset = Lseek(idx_fd_, 0, SEEK_END);
@@ -366,15 +376,24 @@ class DiscList{
 			return true;
 		}
 
+		string GetVal(Link l)
+		{
+			char* buf = new char[l.size];
+			Lseek(data_fd_, l.offset, SEEK_SET);
+			Read(data_fd_, buf, l.size); //至此，结点中的内容在buf里
+			string val(buf, l.size); // 读取val
+			delete[] buf;
+
+			return val;
+		}
+
 	private:
 
 		Node* NodeRead(Link l)
 		{
-			char* buf = new char[l.node_size];
-
+			char* buf = new char[l.size];
 			Lseek(idx_fd_, l.offset, SEEK_SET);
-
-			Read(idx_fd_, buf, l.node_size); //至此，结点中的内容在buf里
+			Read(idx_fd_, buf, l.size); //至此，结点中的内容在buf里
 			Node* np = Node::Decode(buf);
 			delete[] buf;
 
@@ -412,7 +431,7 @@ class DiscList{
 
 		Header header_;
 		off_t header_offset_;
-		string file_;
+		string name_;
 		int idx_fd_;
 		int data_fd_;
 };
@@ -420,7 +439,7 @@ class DiscList{
 
 int main()
 {
-	string cmd, key;
+	string cmd, key, val;
 	DiscList l("mylist");
 
 	if(!l.Open()){
@@ -438,8 +457,8 @@ int main()
 		cout<<"please input command:"<<endl;
 		cin>>cmd;
 		if(cmd == "add"){
-			cin>>key;
-			if(!l.Add(key))
+			cin>>key>>val;
+			if(!l.Add(key, val))
 				cout << "already exist" <<endl;
 		}else if(cmd == "del"){
 			cin>>key;
