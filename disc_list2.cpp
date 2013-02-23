@@ -143,7 +143,8 @@ class Node{
 			return sz;
 		}
 
-		Link Next() { return next_; }
+		Link GetNext() { return next_; }
+		void SetNext(Link l) { next_ = l;};
 		bool IsValid(){return valid_;} 
 		void SetValid(bool v) {valid_ = v;}
 		string GetData() {return data_;}
@@ -201,6 +202,9 @@ class DiscList{
 		DiscList(const string& file):file_(file){
 			hp_ = new Header;
 		}
+		DiscList(){
+			hp_ = new Header;
+		}
 		~DiscList(){
 			delete hp_;
 		}
@@ -223,6 +227,12 @@ class DiscList{
 			return true;
 		}
 
+		void Init(int fd, off_t offset)
+		{
+			fd_ = fd;
+			header_offset_ = offset;
+		}
+
 		void Close()
 		{
 			close(fd_);
@@ -237,7 +247,7 @@ class DiscList{
 				Node* np = NodeRead(p);
 				if(np->IsValid())
 					cout<<np->GetData()<<", ";
-				p=np->Next();
+				p=np->GetNext();
 				delete np;
 			}
 			cout<<endl;
@@ -251,28 +261,50 @@ class DiscList{
 				Node* np = NodeRead(p);
 				if(np->IsValid())
 					dest.Add(np->GetData());
-				p=np->Next();
+				p=np->GetNext();
 				delete np;
 			}
 		}
 
-		/*
-		   bool list_get(char* data)
-		   {
-		   Link p=head.first;
-		   while(p.offset!=0){
-		   Node* np = node_read(p);
-		   if(np->valid_ && !strcmp(np->data, data))	//matched
-		   return true;
-		   p=np->next;
-		   node_free(np);
-		   }
-		   return false;
-		   }
-		 */
-
-		void Add(const string& data)
+		bool Find(const string& data, Node** npp = NULL, Link* lp = NULL, 
+				Node** prev_npp = NULL, Link* prev_lp = NULL)
 		{
+			if(prev_lp) *prev_lp = Link(0, 0);
+			if(prev_npp) *prev_npp = NULL;
+
+			Link l=hp_->GetFirst();
+			while(!l.IsNull()){
+				Node* np = NodeRead(l);
+				if(np->IsValid() && np->GetData() == data){	//matched
+					if(npp) *npp = np;
+					if(lp) *lp = l;
+					return true;
+				}
+				
+				if(prev_npp && *prev_npp)
+					delete *prev_npp;
+
+				if(prev_npp) *prev_npp = np;
+				if(prev_lp) *prev_lp = l;
+
+				l=np->GetNext();
+
+				if(!prev_npp)
+					delete np;
+			}
+
+			//Not Found
+			if(prev_npp && *prev_npp)
+				delete *prev_npp;
+
+			return false;
+		}
+
+		bool Add(const string& data)
+		{
+			if(Find(data))	//alread exist
+				return false;
+
 			Node n(true, data, hp_->GetFirst());
 			char* node_rep = Node::Encode(&n);
 			//在文件结尾写入新的结点，并更新头结点信息
@@ -283,33 +315,48 @@ class DiscList{
 			HeaderWrite();
 
 			delete node_rep;
+			return true;
 		}
 
 		bool Del(const string& data)
 		{
-			Link p=hp_->GetFirst();
-			while(!p.IsNull()){
-				Node* np = NodeRead(p);
-				if(np->IsValid() && np->GetData() == data){	//matched
-					np->SetValid(false);
-					NodeWriteInplace(np, p.offset);
-					return true;
-				}
-				p=np->Next();
-				delete np;
+			Node* np = NULL;
+			Node* prev_np = NULL;
+			Link prev_l, l;
+			bool found = Find(data, &np, &l, &prev_np, &prev_l);
+			if(!found) 
+				return false;
+
+			if(!prev_np){	
+				//the found node is the first node of the list, so update the link info in header
+				hp_->SetFirst(np->GetNext());
+				HeaderWrite();
+			}else{	
+				//update the link info in prev node
+				prev_np->SetNext(np->GetNext());
+				NodeWriteInplace(prev_np, prev_l.offset);
 			}
-			return false;
+
+			/*
+			np->SetValid(false);
+			NodeWriteInplace(np, l.offset);
+			*/
+			delete np;
+			if(prev_np)
+				delete prev_np;
+
+			return true;
 		}
 
 	private:
 
-		Node* NodeRead(Link lp)
+		Node* NodeRead(Link l)
 		{
-			char* buf = new char[lp.node_size];
+			char* buf = new char[l.node_size];
 
-			Lseek(fd_, lp.offset, SEEK_SET);
+			Lseek(fd_, l.offset, SEEK_SET);
 
-			Read(fd_, buf, lp.node_size); //至此，结点中的内容在buf里
+			Read(fd_, buf, l.node_size); //至此，结点中的内容在buf里
 			Node* np = Node::Decode(buf);
 			delete[] buf;
 
@@ -346,6 +393,7 @@ class DiscList{
 		}
 
 		Header* hp_;
+		off_t header_offset_;
 		string file_;
 		int fd_;
 };
@@ -372,7 +420,8 @@ int main()
 		cin>>cmd;
 		if(cmd == "add"){
 			cin>>data;
-			l.Add(data);
+			if(!l.Add(data))
+				cout << "already exist" <<endl;
 		}else if(cmd == "del"){
 			cin>>data;
 			l.Del(data);
