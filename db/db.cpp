@@ -20,17 +20,11 @@ using namespace std;
 先读入一个固定大小的结构，其中包含必要的元信息，从元信息中得到长度信息，再读入。
 */
 
-static const int HASH_TABLE_SIZE = 4993;	//一个素数
+//static const int HASH_TABLE_SIZE = 4993;	//一个素数
+static const int HASH_TABLE_SIZE = 2;	//一个素数
 static const int MAX_KEY_SIZE = 1024;
 static const int MAX_VAL_SIZE = 1024*1024;
 
-struct hash_entry{
-	int entry_size;
-	off_t record_offset;	//record offset in data file
-	size_t record_size;	//record size
-	bool deleted;			//这条记录是正在使用，还是已经被标记为删除？
-	char* key;
-};
 
 int Open(const string& pathname, int flags)
 {
@@ -92,35 +86,49 @@ void *Malloc(size_t size)
 	return ptr;
 }
 
-struct Link{
-	size_t size;
-	off_t offset;	 //offset为0为结尾
+class Link{
+	public:
+		Link(size_t ns, off_t os)
+			:total_size_(ns),size_(ns),offset_(os){}
+		Link()
+			:total_size_(0),size_(0),offset_(0){}
 
-	Link(size_t ns, off_t os)
-		:size(ns),offset(os){}
-	Link()
-		:size(0),offset(0){}
+		static void Encode(char* buf, const Link& l)
+		{
+			char* ptr = buf;
+			memcpy(ptr, &l.total_size_, sizeof(l.total_size_));
+			ptr += sizeof(l.total_size_);
+			memcpy(ptr, &l.size_, sizeof(l.size_));
+			ptr += sizeof(l.size_);
+			memcpy(ptr, &l.offset_, sizeof(l.offset_));
+		}
 
-	static void Encode(char* buf, Link l)
-	{
-		char* ptr = buf;
-		memcpy(ptr, &l.size, sizeof(l.size));	//写入下一个结点的大小信息
-		ptr += sizeof(l.size);
-		memcpy(ptr, &l.offset, sizeof(l.offset));	//写入下一个结点的offset信息
-	}
+		static void Decode(Link* lp, char* buf)
+		{
+			char* ptr = buf;
+			memcpy(&lp->total_size_, ptr, sizeof(lp->total_size_));
+			ptr += sizeof(lp->total_size_);
+			memcpy(&lp->size_, ptr, sizeof(lp->size_));
+			ptr += sizeof(lp->size_);
+			memcpy(&lp->offset_, ptr, sizeof(lp->offset_));
+		}
 
-	static void Decode(Link* lp, char* buf)
-	{
-		char* ptr = buf;
-		memcpy(&lp->size, ptr, sizeof(lp->size));	//读取下一个结点的大小信息
-		ptr += sizeof(lp->size);
-		memcpy(&lp->offset, ptr, sizeof(lp->offset));	//读取下一个结点的offset信息
-	}
+		bool IsNull() {return offset_ == 0;}
 
-	bool IsNull() {return offset == 0;}
-	static size_t Size(){
-		return sizeof(size_t) + sizeof(off_t);
-	}
+		static size_t Size(){
+			return sizeof(size_t) + sizeof(size_t) + sizeof(off_t);
+		}
+		size_t GetSize() {return size_;}
+		void SetSize(size_t s) {size_ = s;}
+		size_t GetTotalSize() {return total_size_;}
+		void SetTotalSize(size_t s) {total_size_ = s;}
+		off_t GetOffset() {return offset_;}
+		void SetOffset(off_t o) {offset_ = o;}
+
+	private:
+		size_t total_size_;	//first allocated size
+		size_t size_;	//current size
+		off_t offset_;	 //offset_为0为结尾
 };
 
 class Node{
@@ -186,6 +194,7 @@ class Node{
 		void SetValid(bool v) {valid_ = v;}
 		string GetKey() {return key_;}
 		Link GetValLink() { return val_link_; }
+		void SetValLink(Link l) { val_link_ = l; }
 
 	private:
 		Node(){}
@@ -206,19 +215,14 @@ class Header{
 		static char* Encode(Header* hp)
 		{
 			char* buf = new char[Size()];
-			char* ptr = buf;
-			memcpy(ptr, &hp->first_.size, sizeof(hp->first_.size));	//写入下一个结点的大小信息
-			ptr += sizeof(hp->first_.size);
-			memcpy(ptr, &hp->first_.offset, sizeof(hp->first_.offset));	//写入下一个结点的offset信息
+			Link::Encode(buf, hp->first_);
 			return buf;
 		}
 
 		static Header* Decode(Header* hp, char* buf)
 		{
 			char* ptr = buf;
-			memcpy(&hp->first_.size, ptr, sizeof(hp->first_.size));	//写入下一个结点的大小信息
-			ptr += sizeof(hp->first_.size);
-			memcpy(&hp->first_.offset, ptr, sizeof(hp->first_.offset));	//写入下一个结点的offset信息
+			Link::Decode(&hp->first_, buf);
 			return hp;
 		}
 
@@ -228,9 +232,9 @@ class Header{
 		}
 
 		void SetFirst(Link l){
-			first_.size = l.size;
-			first_.offset = l.offset;
+			first_ = l;
 		}
+
 	private:
 		Link first_;
 };
@@ -339,6 +343,32 @@ class DList{
 			return true;
 		}
 
+		bool Set(const string& key, const string& val)
+		{
+			//update对应key的val，如果不存在则返回false
+			Node* np = NULL;
+			Link l;
+			bool found = Find(key, &np, &l);
+			if(!found) 
+				return false;
+
+			Link val_link = np->GetValLink();
+			if(val_link.GetTotalSize() >= val.length()) 	//the old val has enough space, write new val at original offset
+				Lseek(data_fd_, val_link.GetOffset(), SEEK_SET);
+			else{ 	//space is not enough, write the new val at the end of file
+				val_link.SetOffset(Lseek(data_fd_, 0, SEEK_END));	//new offset
+				val_link.SetTotalSize(val.length());	//new total size
+			}
+
+			val_link.SetSize(val.length());
+			Write(data_fd_, val.c_str(), val.length());
+			np->SetValLink(val_link);
+			NodeWriteInplace(np, l.GetOffset());
+
+			delete np;
+			return true;
+		}
+
 		bool Del(const string& key)
 		{
 			Node* np = NULL;
@@ -355,7 +385,7 @@ class DList{
 			}else{	
 				//update the link info in prev node
 				prev_np->SetNext(np->GetNext());
-				NodeWriteInplace(prev_np, prev_l.offset);
+				NodeWriteInplace(prev_np, prev_l.GetOffset());
 			}
 
 			/*
@@ -392,10 +422,10 @@ class DList{
 
 		string GetVal(Link l)
 		{
-			char* buf = new char[l.size];
-			Lseek(data_fd_, l.offset, SEEK_SET);
-			Read(data_fd_, buf, l.size); //至此，结点中的内容在buf里
-			string val(buf, l.size); // 读取val
+			char* buf = new char[l.GetSize()];
+			Lseek(data_fd_, l.GetOffset(), SEEK_SET);
+			Read(data_fd_, buf, l.GetSize()); //至此，结点中的内容在buf里
+			string val(buf, l.GetSize()); // 读取val
 			delete[] buf;
 
 			return val;
@@ -405,9 +435,9 @@ class DList{
 
 		Node* NodeRead(Link l)
 		{
-			char* buf = new char[l.size];
-			Lseek(idx_fd_, l.offset, SEEK_SET);
-			Read(idx_fd_, buf, l.size); //至此，结点中的内容在buf里
+			char* buf = new char[l.GetSize()];
+			Lseek(idx_fd_, l.GetOffset(), SEEK_SET);
+			Read(idx_fd_, buf, l.GetSize()); //至此，结点中的内容在buf里
 			Node* np = Node::Decode(buf);
 			delete[] buf;
 
@@ -475,31 +505,46 @@ class DB{
 			idx_fd_ = data_fd_ = -1;
 		}
 
-		bool Add(const string& key, const string& val){
+		bool Add(const string& key, const string& val)
+		{
 			//先查找，如果记录已经存在，则返回添加失败，暂不支持修改操作
 			//直接加入到data文件最后
 			//然后根据hash值，找到对应的位置，更新idx文件
 			int h = hash(key.c_str());
 			return list_arr_[h].Add(key, val);
 		}
-		bool Del(const string& key){
+
+		bool Set(const string& key, const string& val)
+		{
+			//update对应key的val，如果不存在则返回false
+			int h = hash(key.c_str());
+			return list_arr_[h].Set(key, val);
+		}
+
+		bool Del(const string& key)
+		{
 			//先查找，如果记录不存在则直接返回失败，否则mark为deleted，不做记录移动
 			int h = hash(key.c_str());
 			return list_arr_[h].Del(key);
 		}
-		bool Get(const string& key, string* val){
-			//返回对应key的val，如果不存在则返回NULL
+
+		bool Get(const string& key, string* val)
+		{
+			//返回对应key的val，如果不存在则返回false
 			int h = hash(key.c_str());
 			return list_arr_[h].Get(key, val);
 		}
-		void Print(){
-				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					if(!list_arr_[i].Empty()){
-						cout<<"list "<<i<<": ";
-						list_arr_[i].Print();
-					}
+
+		void Print()
+		{
+			for(int i=0; i<HASH_TABLE_SIZE; i++){
+				if(!list_arr_[i].Empty()){
+					cout<<"list "<<i<<": ";
+					list_arr_[i].Print();
 				}
+			}
 		}
+
 	private:
 		int hash(const char* str)
 		{
@@ -539,9 +584,14 @@ int main()
 		}else if(cmd == "show"){
 			db.Print();
 		}else if(cmd == "get"){
-			string val;
 			cin>>key;
 			if(db.Get(key, &val))
+				cout<<"("<<key<<", "<<val<<")"<<endl;
+			else
+				cout<<"no such key: "<<key<<endl;
+		}else if(cmd == "set"){
+			cin>>key>>val;
+			if(db.Set(key, val))
 				cout<<"("<<key<<", "<<val<<")"<<endl;
 			else
 				cout<<"no such key: "<<key<<endl;
