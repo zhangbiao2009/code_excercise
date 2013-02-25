@@ -113,16 +113,16 @@ class Link{
 			memcpy(&lp->offset_, ptr, sizeof(lp->offset_));
 		}
 
-		bool IsNull() {return offset_ == 0;}
+		bool IsNull()const {return offset_ == 0;}
 
 		static size_t Size(){
 			return sizeof(size_t) + sizeof(size_t) + sizeof(off_t);
 		}
-		size_t GetSize() {return size_;}
+		size_t GetSize()const {return size_;}
 		void SetSize(size_t s) {size_ = s;}
-		size_t GetTotalSize() {return total_size_;}
+		size_t GetTotalSize()const {return total_size_;}
 		void SetTotalSize(size_t s) {total_size_ = s;}
-		off_t GetOffset() {return offset_;}
+		off_t GetOffset()const {return offset_;}
 		void SetOffset(off_t o) {offset_ = o;}
 
 	private:
@@ -189,12 +189,12 @@ class Node{
 		}
 
 		Link GetNext() { return next_; }
-		void SetNext(Link l) { next_ = l;};
+		void SetNext(const Link& l) { next_ = l;};
 		bool IsValid(){return valid_;} 
 		void SetValid(bool v) {valid_ = v;}
 		string GetKey() {return key_;}
 		Link GetValLink() { return val_link_; }
-		void SetValLink(Link l) { val_link_ = l; }
+		void SetValLink(const Link& l) { val_link_ = l; }
 
 	private:
 		Node(){}
@@ -205,65 +205,26 @@ class Node{
 		Link next_;
 };
 
-class Header{
-	public:
-		Header(){}
-		~Header(){}
-
-		static size_t Size() { return Link::Size(); }
-
-		static char* Encode(Header* hp)
-		{
-			char* buf = new char[Size()];
-			Link::Encode(buf, hp->first_);
-			return buf;
-		}
-
-		static Header* Decode(Header* hp, char* buf)
-		{
-			char* ptr = buf;
-			Link::Decode(&hp->first_, buf);
-			return hp;
-		}
-
-		Link GetFirst()
-		{
-			return first_;
-		}
-
-		void SetFirst(Link l){
-			first_ = l;
-		}
-
-	private:
-		Link first_;
-};
-
 class DList{
 	public:
 		DList(){}
 		~DList(){}
 
-		
-
 		void Init(int idx_fd, int data_fd, off_t offset)
 		{
 			idx_fd_ = idx_fd;
 			data_fd_ = data_fd;
-			header_offset_ = offset;
+			head_offset_ = offset;
 		}
-
-			
 
 		bool Empty()
 		{
-			Link l = header_.GetFirst();
-			return l.IsNull();
+			return head_.IsNull();
 		}
 
 		void Print()
 		{
-			Link l=header_.GetFirst();
+			Link l=head_;
 			while(!l.IsNull()){
 				Node* np = NodeRead(l);
 				if(np->IsValid())
@@ -280,7 +241,7 @@ class DList{
 			if(prev_lp) *prev_lp = Link(0, 0);
 			if(prev_npp) *prev_npp = NULL;
 
-			Link l=header_.GetFirst();
+			Link l=head_;
 			while(!l.IsNull()){
 				Node* np = NodeRead(l);
 				if(np->IsValid() && np->GetKey() == key){	//matched
@@ -330,14 +291,14 @@ class DList{
 			Write(data_fd_, val.c_str(), val.length());
 			Link val_link(val.length(), offset);
 
-			Node n(true, key, val_link, header_.GetFirst());
+			Node n(true, key, val_link, head_);
 			char* node_rep = Node::Encode(&n);
 			//在文件结尾写入新的结点，并更新头结点信息
 			offset = Lseek(idx_fd_, 0, SEEK_END);
 			Write(idx_fd_, node_rep, n.Size());
 			//新的链表头结点信息
-			header_.SetFirst(Link(n.Size(), offset));
-			HeaderWrite();
+			head_ = Link(n.Size(), offset);
+			HeadWrite();
 
 			delete[] node_rep;
 			return true;
@@ -379,9 +340,9 @@ class DList{
 				return false;
 
 			if(!prev_np){	
-				//the found node is the first node of the list, so update the link info in header
-				header_.SetFirst(np->GetNext());
-				HeaderWrite();
+				//the found node is the first node of the list, so update the head
+				head_ = np->GetNext();
+				HeadWrite();
 			}else{	
 				//update the link info in prev node
 				prev_np->SetNext(np->GetNext());
@@ -399,28 +360,29 @@ class DList{
 			return true;
 		}
 
-		//把header写入文件
-		void HeaderWrite()
+		//把head写入文件
+		void HeadWrite()
 		{
-			char* header_rep = Header::Encode(&header_);
-			Lseek(idx_fd_, header_offset_, SEEK_SET);
-			Write(idx_fd_, header_rep, Header::Size());
-			delete[] header_rep;
+			char* head_rep = new char[Link::Size()];
+			Link::Encode(head_rep, head_);
+			Lseek(idx_fd_, head_offset_, SEEK_SET);
+			Write(idx_fd_, head_rep, Link::Size());
+			delete[] head_rep;
 		}
 
 		//从文件中读取头部信息
-		void HeaderRead()
+		void HeadRead()
 		{
-			size_t sz = Header::Size();
+			size_t sz = Link::Size();
 			char* buf = new char[sz];
-			Lseek(idx_fd_, header_offset_, SEEK_SET);
+			Lseek(idx_fd_, head_offset_, SEEK_SET);
 			Read(idx_fd_, buf, sz);
-			Header::Decode(&header_, buf);
+			Link::Decode(&head_, buf);
 			
 			delete[] buf;
 		}
 
-		string GetVal(Link l)
+		string GetVal(const Link& l)
 		{
 			char* buf = new char[l.GetSize()];
 			Lseek(data_fd_, l.GetOffset(), SEEK_SET);
@@ -433,7 +395,7 @@ class DList{
 
 	private:
 
-		Node* NodeRead(Link l)
+		Node* NodeRead(const Link& l)
 		{
 			char* buf = new char[l.GetSize()];
 			Lseek(idx_fd_, l.GetOffset(), SEEK_SET);
@@ -452,12 +414,11 @@ class DList{
 			delete[] node_rep;
 		}
 
-		Header header_;
-		off_t header_offset_;
+		Link head_;
+		off_t head_offset_;
 		int idx_fd_;
 		int data_fd_;
 };
-
 
 
 class DB{
@@ -480,18 +441,18 @@ class DB{
 				data_fd_ = ::Open(data_file_name.c_str(), O_CREAT|O_RDWR, 0644);
 
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Header::Size());
-					list_arr_[i].HeaderWrite();
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size());
+					list_arr_[i].HeadWrite();
 				}
 			}else{
 				idx_fd_ = ::Open(idx_file_name.c_str(), O_RDWR);
 				data_fd_ = ::Open(data_file_name.c_str(), O_RDWR);
 
-				//read list headers from file;
-				char* buf = new char[Header::Size()];
+				//read list heads from file;
+				char* buf = new char[Link::Size()];
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Header::Size());
-					list_arr_[i].HeaderRead();
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size());
+					list_arr_[i].HeadRead();
 				}
 				delete[] buf;
 			}
