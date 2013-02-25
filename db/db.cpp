@@ -8,6 +8,7 @@
 #include <cstring>
 #include <string>
 #include <iostream>
+#include <map>
 
 using namespace std;
 
@@ -88,8 +89,11 @@ void *Malloc(size_t size)
 
 class Link{
 	public:
+		Link(size_t ts, size_t s, off_t os)
+			:total_size_(ts),size_(s),offset_(os){}
+		/*
 		Link(size_t ns, off_t os)
-			:total_size_(ns),size_(ns),offset_(os){}
+			:total_size_(ns),size_(ns),offset_(os){}*/
 		Link()
 			:total_size_(0),size_(0),offset_(0){}
 
@@ -210,11 +214,13 @@ class DList{
 		DList(){}
 		~DList(){}
 
-		void Init(int idx_fd, int data_fd, off_t offset)
+		void Init(int idx_fd, int data_fd, off_t offset, map<size_t, Link>* free_node, map<size_t, Link>* free_data)
 		{
 			idx_fd_ = idx_fd;
 			data_fd_ = data_fd;
 			head_offset_ = offset;
+			free_node_ = free_node;
+			free_data_ = free_data;
 		}
 
 		bool Empty()
@@ -238,7 +244,7 @@ class DList{
 		bool Find(const string& key, Node** npp = NULL, Link* lp = NULL, 
 				Node** prev_npp = NULL, Link* prev_lp = NULL)
 		{
-			if(prev_lp) *prev_lp = Link(0, 0);
+			if(prev_lp) *prev_lp = Link();
 			if(prev_npp) *prev_npp = NULL;
 
 			Link l=head_;
@@ -285,19 +291,15 @@ class DList{
 				return false;
 
 			off_t offset;
+			size_t total_size;
 
-			//write data to the end of data file
-			offset = Lseek(data_fd_, 0, SEEK_END);
-			Write(data_fd_, val.c_str(), val.length());
-			Link val_link(val.length(), offset);
+			Link val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
 
 			Node n(true, key, val_link, head_);
 			char* node_rep = Node::Encode(&n);
-			//在文件结尾写入新的结点，并更新头结点信息
-			offset = Lseek(idx_fd_, 0, SEEK_END);
-			Write(idx_fd_, node_rep, n.Size());
+
 			//新的链表头结点信息
-			head_ = Link(n.Size(), offset);
+			head_ = FindRooMAndWrite(node_rep, n.Size(), idx_fd_, free_node_);
 			HeadWrite();
 
 			delete[] node_rep;
@@ -317,6 +319,8 @@ class DList{
 			if(val_link.GetTotalSize() >= val.length()) 	//the old val has enough space, write new val at original offset
 				Lseek(data_fd_, val_link.GetOffset(), SEEK_SET);
 			else{ 	//space is not enough, write the new val at the end of file
+				//todo: check if free data map has available space
+				(*free_data_)[val_link.GetTotalSize()] = val_link;		//add original data space to free data map
 				val_link.SetOffset(Lseek(data_fd_, 0, SEEK_END));	//new offset
 				val_link.SetTotalSize(val.length());	//new total size
 			}
@@ -348,6 +352,11 @@ class DList{
 				prev_np->SetNext(np->GetNext());
 				NodeWriteInplace(prev_np, prev_l.GetOffset());
 			}
+			//add removed node info to free node map
+			(*free_node_)[l.GetTotalSize()] = l;
+			//add removed corresponding data space to free data map
+			Link val_link = np->GetValLink();
+			(*free_data_)[val_link.GetTotalSize()] = val_link;
 
 			/*
 			np->SetValid(false);
@@ -414,10 +423,33 @@ class DList{
 			delete[] node_rep;
 		}
 
+		//return link info that describes the write which just happened
+		Link FindRooMAndWrite(const char* data, size_t len,  int fd, map<size_t, Link>* free_space)
+		{	
+			Link l;
+			//first find data space which is >= data length in free space map
+			map<size_t, Link>::iterator iter = free_space->lower_bound(len);
+			if(iter != free_space->end()){  // found proper space in free space map
+				l = iter->second;
+				Lseek(fd, l.GetOffset(), SEEK_SET);
+				free_space->erase(iter);		//remove from free space map because it'll be reused
+			}else{
+				// no proper space in free space map, write data to the end of the file
+				l.SetOffset(Lseek(fd, 0, SEEK_END));
+				l.SetTotalSize(len);
+				l.SetSize(len);
+			}
+
+			Write(fd, data, len);
+			return l;
+		}
+
 		Link head_;
 		off_t head_offset_;
 		int idx_fd_;
 		int data_fd_;
+		map<size_t, Link>* free_node_;
+		map<size_t, Link>* free_data_;
 };
 
 
@@ -441,7 +473,7 @@ class DB{
 				data_fd_ = ::Open(data_file_name.c_str(), O_CREAT|O_RDWR, 0644);
 
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size());
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_);
 					list_arr_[i].HeadWrite();
 				}
 			}else{
@@ -451,7 +483,7 @@ class DB{
 				//read list heads from file;
 				char* buf = new char[Link::Size()];
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size());
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_);
 					list_arr_[i].HeadRead();
 				}
 				delete[] buf;
@@ -506,6 +538,18 @@ class DB{
 			}
 		}
 
+		void PrintFreeMap()
+		{
+			cout<<"free node map: ";
+			for (map<size_t, Link>::iterator it=free_node_.begin(); it!=free_node_.end(); ++it)
+				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
+			cout<<endl;
+			cout<<"free data map: ";
+			for (map<size_t, Link>::iterator it=free_data_.begin(); it!=free_data_.end(); ++it)
+				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
+			cout<<endl;
+		}
+
 	private:
 		int hash(const char* str)
 		{
@@ -520,6 +564,8 @@ class DB{
 		int idx_fd_;
 		int data_fd_;
 		DList* list_arr_;
+		map<size_t, Link> free_node_;	//entry: available space => link
+		map<size_t, Link> free_data_;
 };
 
 
@@ -560,6 +606,7 @@ int main()
 		else{
 			return 0;
 		}
+		db.PrintFreeMap();
 	}
 
 	db.Close();
