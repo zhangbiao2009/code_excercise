@@ -270,20 +270,6 @@ class DList{
 			cout<<endl;
 		}
 
-		//copy list to another file, only valid nodes are copied.
-		/*
-		void Copy(DList& dest)
-		{
-			Link p=header_.GetFirst();
-			while(!p.IsNull()){
-				Node* np = NodeRead(p);
-				if(np->IsValid())
-					dest.Add(np->GetKey());
-				p=np->GetNext();
-				delete np;
-			}
-		}*/
-
 		bool Find(const string& key, Node** npp = NULL, Link* lp = NULL, 
 				Node** prev_npp = NULL, Link* prev_lp = NULL)
 		{
@@ -316,6 +302,16 @@ class DList{
 				delete *prev_npp;
 
 			return false;
+		}
+
+		bool Get(const string& key, string* val){
+			Node* np = NULL;
+			bool found = Find(key, &np);
+			if(!found) 
+				return false;
+			*val = GetVal(np->GetValLink());
+			delete np;
+			return true;
 		}
 
 		bool Add(const string& key, const string& val)
@@ -491,12 +487,11 @@ class DB{
 			int h = hash(key.c_str());
 			return list_arr_[h].Del(key);
 		}
-		/*
-		const string& Get(const string& key){
+		bool Get(const string& key, string* val){
 			//返回对应key的val，如果不存在则返回NULL
 			int h = hash(key.c_str());
-			return list_arr_[h].Get(key);
-		}*/
+			return list_arr_[h].Get(key, val);
+		}
 		void Print(){
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
 					if(!list_arr_[i].Empty()){
@@ -542,11 +537,18 @@ int main()
 			cin>>key;
 			db.Del(key);
 		}else if(cmd == "show"){
+			db.Print();
+		}else if(cmd == "get"){
+			string val;
+			cin>>key;
+			if(db.Get(key, &val))
+				cout<<"("<<key<<", "<<val<<")"<<endl;
+			else
+				cout<<"no such key: "<<key<<endl;
 		}
 		else{
 			return 0;
 		}
-		db.Print();
 	}
 
 	db.Close();

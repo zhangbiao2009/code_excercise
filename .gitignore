@@ -16,6 +16,8 @@ local.properties
 .settings/
 .loadpath
 *.exe
+*.data
+*.idx
 a.out
 
 # External tool builders
