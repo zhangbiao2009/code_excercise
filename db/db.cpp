@@ -16,16 +16,124 @@ using namespace std;
    一个简单的key value DB
  */
 
-/*
-读取：
-先读入一个固定大小的结构，其中包含必要的元信息，从元信息中得到长度信息，再读入。
-*/
-
 //static const int HASH_TABLE_SIZE = 4993;	//一个素数
 static const int HASH_TABLE_SIZE = 2;	//一个素数
 static const int MAX_KEY_SIZE = 1024;
 static const int MAX_VAL_SIZE = 1024*1024;
+const int MAX_CACHE_SIZE = 5;
 
+class LRUCache{
+	public:
+		struct Node{
+			string key;
+			string val;
+			struct Node* prev;
+			struct Node* next;
+
+			static Node* NewNode(const string& key, const string& val)
+			{
+				Node* np = new Node;
+				np->key = key;
+				np->val = val;
+				np->prev = np->next = np; //point to itself
+				return np;
+			}
+		};
+		
+		LRUCache()
+		{
+			head_.prev = head_.next = &head_;
+		}
+		~LRUCache(){}
+
+		//add or replace
+		void Set(const string& key, const string& val)
+		{
+			Node* node = Find(key);
+			if(!node){
+				node = Node::NewNode(key, val);
+				if(cache_.size() >= MAX_CACHE_SIZE){
+					//evict an entry according to LRU policy (from list tail)
+					Node* tmp = head_.prev;
+					RemoveFromList(tmp);
+					cache_.erase(tmp->key);
+					delete tmp;
+				} 
+				//store the address in the cache
+				cache_[key] = node;
+			}else
+				node->val = val; //set the value
+
+			//put it in list front
+			Promote(node);
+		}
+
+		void Del(const string& key)
+		{
+			Node* np = Find(key);
+			if(np){
+				RemoveFromList(np);
+				cache_.erase(np->key);
+				delete np;
+			}
+		}
+
+		bool Get(const string& key, string* val)
+		{
+			Node* np = Find(key);
+			if(np){
+				//put it in list front
+				Promote(np);
+				*val = np->val;
+				return true;
+			}
+			return false;
+		}
+
+		void Print()
+		{
+			cout<<"current cache status:"<<endl;
+			for(Node* np=head_.next; np!=&head_; np=np->next){
+				cout<<"("<<np->key<<", "<<np->val<<") ";
+			}
+			cout<<endl;
+		}
+
+	private:
+
+		Node* Find(const string& key)
+		{
+			map<string, Node*>::iterator iter= cache_.find(key);
+			if(iter == cache_.end())
+				return NULL;
+			return iter->second;
+		}
+
+		void RemoveFromList(Node* node)
+		{
+			node->prev->next = node->next;
+			node->next->prev = node->prev;
+		}
+
+		//put it to the front
+		void Promote(Node* node)
+		{
+			if(node->prev != node && node->next != node){
+				//not a new node, already in the list, remove it from the list
+				RemoveFromList(node);
+			}
+
+			//insert node in the front
+			node->next = head_.next;
+			node->prev = &head_;
+			node->prev->next = node;
+			node->next->prev = node;
+		}
+
+		//circular doubly linked list
+		Node head_;
+		map<string, Node*> cache_;
+};
 
 int Open(const string& pathname, int flags)
 {
@@ -534,6 +642,7 @@ class DB{
 
 		bool Set(const string& key, const string& val)
 		{
+			cache_.Del(key);
 			//update对应key的val，如果不存在则返回false
 			int h = hash(key.c_str());
 			return list_arr_[h].Set(key, val);
@@ -541,7 +650,7 @@ class DB{
 
 		bool Del(const string& key)
 		{
-			//先查找，如果记录不存在则直接返回失败，否则mark为deleted，不做记录移动
+			cache_.Del(key);
 			int h = hash(key.c_str());
 			return list_arr_[h].Del(key);
 		}
@@ -549,8 +658,13 @@ class DB{
 		bool Get(const string& key, string* val)
 		{
 			//返回对应key的val，如果不存在则返回false
+			if(cache_.Get(key, val))	//in cache
+				return true;
 			int h = hash(key.c_str());
-			return list_arr_[h].Get(key, val);
+			int ret = list_arr_[h].Get(key, val);
+			if(ret)
+				cache_.Set(key, *val);
+			return ret;
 		}
 
 		void Print()
@@ -562,6 +676,35 @@ class DB{
 				}
 			}
 		}
+		
+		void PrintCache()
+		{
+			cache_.Print();
+		}
+
+		void PrintFreeMap()
+		{
+			cout<<"free node map: ";
+			for (map<size_t, Link>::iterator it=free_node_.begin(); it!=free_node_.end(); ++it)
+				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
+			cout<<endl;
+			cout<<"free data map: ";
+			for (map<size_t, Link>::iterator it=free_data_.begin(); it!=free_data_.end(); ++it)
+				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
+			cout<<endl;
+		}
+
+	private:
+		int hash(const char* str)
+		{
+			int h = 0;
+			for(const char* p = str; *p!= '\0'; p++){
+				h = (31*h+*p)%HASH_TABLE_SIZE;
+			}
+			return h;
+
+		}
+
 		void InitFreeMaps(){
 			string free_file_name = dbname_+".free";
 
@@ -604,35 +747,14 @@ class DB{
 			::Close(free_fd);
 		}
 
-		void PrintFreeMap()
-		{
-			cout<<"free node map: ";
-			for (map<size_t, Link>::iterator it=free_node_.begin(); it!=free_node_.end(); ++it)
-				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
-			cout<<endl;
-			cout<<"free data map: ";
-			for (map<size_t, Link>::iterator it=free_data_.begin(); it!=free_data_.end(); ++it)
-				cout << "(" << it->first << ", " << it->second.GetTotalSize()<< ", "<<it->second.GetOffset()<< ") ";
-			cout<<endl;
-		}
-
-	private:
-		int hash(const char* str)
-		{
-			int h = 0;
-			for(const char* p = str; *p!= '\0'; p++){
-				h = (31*h+*p)%HASH_TABLE_SIZE;
-			}
-			return h;
-
-		}
-
 		string dbname_;
 		int idx_fd_;
 		int data_fd_;
 		DList* list_arr_;
 		map<size_t, Link> free_node_;	//entry: available space => link
 		map<size_t, Link> free_data_;
+
+		LRUCache cache_;
 };
 
 
@@ -673,7 +795,7 @@ int main()
 		else{
 			return 0;
 		}
-		db.PrintFreeMap();
+		db.PrintCache();
 	}
 
 	db.Close();
