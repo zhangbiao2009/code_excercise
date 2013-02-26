@@ -316,16 +316,14 @@ class DList{
 				return false;
 
 			Link val_link = np->GetValLink();
-			if(val_link.GetTotalSize() >= val.length()) 	//the old val has enough space, write new val at original offset
+			if(val_link.GetTotalSize() >= val.length()){ 	//the old val has enough space, write new val at original offset
 				Lseek(data_fd_, val_link.GetOffset(), SEEK_SET);
-			else{ 	//space is not enough, write the new val at the end of file
-				//todo: check if free data map has available space
+				val_link.SetSize(val.length());
+			}else{ 	//space is not enough, write the new val at the end of file
 				(*free_data_)[val_link.GetTotalSize()] = val_link;		//add original data space to free data map
-				val_link.SetOffset(Lseek(data_fd_, 0, SEEK_END));	//new offset
-				val_link.SetTotalSize(val.length());	//new total size
+				val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
 			}
 
-			val_link.SetSize(val.length());
 			Write(data_fd_, val.c_str(), val.length());
 			np->SetValLink(val_link);
 			NodeWriteInplace(np, l.GetOffset());
