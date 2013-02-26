@@ -47,6 +47,16 @@ int Open(const string& pathname, int flags, mode_t mode)
 	return ret;
 }
 
+int Close(int fd)
+{
+	int ret;
+	if((ret = close(fd)) < 0){
+		perror("close");
+		exit(1);
+	}
+	return ret;
+}
+
 off_t Lseek(int fd, off_t offset, int whence)
 {
 	off_t off;
@@ -76,16 +86,14 @@ ssize_t Write(int fd, const void *buf, size_t count)
 	}
 	return size;
 }
-
-void *Malloc(size_t size)
+int Unlink(const string& pathname)
 {
-	void * ptr = malloc(size);
-	if(!ptr){
-		fprintf(stderr, "not enough memory\n");
+	if(unlink(pathname.c_str())<0){
+		perror("unlink");
 		exit(1);
 	}
-	return ptr;
 }
+
 
 class Link{
 	public:
@@ -115,6 +123,37 @@ class Link{
 			memcpy(&lp->size_, ptr, sizeof(lp->size_));
 			ptr += sizeof(lp->size_);
 			memcpy(&lp->offset_, ptr, sizeof(lp->offset_));
+		}
+		//写入文件
+		static void Write(const Link& l, int fd, off_t offset)
+		{
+			Lseek(fd, offset, SEEK_SET);
+			Write(l, fd);
+		}
+
+		//write in current offset
+		static void Write(const Link& l, int fd)
+		{
+			char* link_rep = new char[Link::Size()];
+			Link::Encode(link_rep, l);
+			::Write(fd, link_rep, Link::Size());
+			delete[] link_rep;
+		}
+
+		//从文件中读取
+		static void Read(Link* lp, int fd, off_t offset)
+		{
+			Lseek(fd, offset, SEEK_SET);
+			Read(lp, fd);
+		}
+		//read in current offset
+		static void Read(Link* lp, int fd)
+		{
+			size_t sz = Link::Size();
+			char* buf = new char[sz];
+			::Read(fd, buf, sz);
+			Link::Decode(lp, buf);
+			delete[] buf;
 		}
 
 		bool IsNull()const {return offset_ == 0;}
@@ -368,26 +407,10 @@ class DList{
 		}
 
 		//把head写入文件
-		void HeadWrite()
-		{
-			char* head_rep = new char[Link::Size()];
-			Link::Encode(head_rep, head_);
-			Lseek(idx_fd_, head_offset_, SEEK_SET);
-			Write(idx_fd_, head_rep, Link::Size());
-			delete[] head_rep;
-		}
+		void HeadWrite() { Link::Write(head_, idx_fd_, head_offset_); }
 
 		//从文件中读取头部信息
-		void HeadRead()
-		{
-			size_t sz = Link::Size();
-			char* buf = new char[sz];
-			Lseek(idx_fd_, head_offset_, SEEK_SET);
-			Read(idx_fd_, buf, sz);
-			Link::Decode(&head_, buf);
-			
-			delete[] buf;
-		}
+		void HeadRead() { Link::Read(&head_, idx_fd_, head_offset_); }
 
 		string GetVal(const Link& l)
 		{
@@ -463,20 +486,23 @@ class DB{
 
 		bool Open(const string& dbname)
 		{
-			string idx_file_name = dbname+".idx";
-			string data_file_name = dbname+".data";
+			dbname_ = dbname;
+			string idx_file_name = dbname_+".idx";
+			string data_file_name = dbname_+".data";
+
+			InitFreeMaps();
 
 			if(access(data_file_name.c_str(), F_OK) < 0){	//file not exist
-				idx_fd_ = ::Open(idx_file_name.c_str(), O_CREAT|O_RDWR, 0644);
-				data_fd_ = ::Open(data_file_name.c_str(), O_CREAT|O_RDWR, 0644);
+				idx_fd_ = ::Open(idx_file_name, O_CREAT|O_RDWR, 0644);
+				data_fd_ = ::Open(data_file_name, O_CREAT|O_RDWR, 0644);
 
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
 					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_);
 					list_arr_[i].HeadWrite();
 				}
 			}else{
-				idx_fd_ = ::Open(idx_file_name.c_str(), O_RDWR);
-				data_fd_ = ::Open(data_file_name.c_str(), O_RDWR);
+				idx_fd_ = ::Open(idx_file_name, O_RDWR);
+				data_fd_ = ::Open(data_file_name, O_RDWR);
 
 				//read list heads from file;
 				char* buf = new char[Link::Size()];
@@ -491,9 +517,10 @@ class DB{
 		}
 
 		void Close(){
-			close(idx_fd_);
-			close(data_fd_);
+			::Close(idx_fd_);
+			::Close(data_fd_);
 			idx_fd_ = data_fd_ = -1;
+			WriteFreeMaps();
 		}
 
 		bool Add(const string& key, const string& val)
@@ -535,6 +562,47 @@ class DB{
 				}
 			}
 		}
+		void InitFreeMaps(){
+			string free_file_name = dbname_+".free";
+
+			if(access(free_file_name.c_str(), F_OK) < 0)	//file not exist, nothing to do
+				return;
+
+			int free_fd = ::Open(free_file_name, O_RDWR);
+			::Unlink(free_file_name);		//unlink it
+			int n_free_node, n_free_data; 
+			::Read(free_fd, &n_free_node, sizeof(n_free_node));
+			::Read(free_fd, &n_free_data, sizeof(n_free_data));
+
+			Link l;
+			for(int i=0; i<n_free_node; i++){
+				Link::Read(&l, free_fd);
+				free_node_[l.GetTotalSize()] = l;
+			}
+			for(int i=0; i<n_free_data; i++){
+				Link::Read(&l, free_fd);
+				free_data_[l.GetTotalSize()] = l;
+			}
+
+			::Close(free_fd);
+		}
+
+		void WriteFreeMaps(){
+			string free_file_name = dbname_+".free";
+			int free_fd = ::Open(free_file_name, O_CREAT|O_RDWR, 0644);
+			int n_free_node  = free_node_.size();
+			int n_free_data = free_data_.size();
+
+			Write(free_fd, &n_free_node, sizeof(n_free_node));
+			Write(free_fd, &n_free_data, sizeof(n_free_data));
+
+			map<size_t, Link>::iterator iter;
+			for(iter = free_node_.begin(); iter != free_node_.end(); iter++)
+				Link::Write(iter->second, free_fd);
+			for(iter = free_data_.begin(); iter != free_data_.end(); iter++)
+				Link::Write(iter->second, free_fd);
+			::Close(free_fd);
+		}
 
 		void PrintFreeMap()
 		{
@@ -559,6 +627,7 @@ class DB{
 
 		}
 
+		string dbname_;
 		int idx_fd_;
 		int data_fd_;
 		DList* list_arr_;
