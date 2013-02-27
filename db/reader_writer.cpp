@@ -112,7 +112,17 @@ int nreaders=0;
 int nwriters=0;
 int nwaited_readers = 0;
 int nwaited_writers = 0;
-volatile bool can_read = false;
+
+#define MAX_NTHREADS 100
+Mutex cm[MAX_NTHREADS];	//mutex for control
+CondVar* cv[MAX_NTHREADS];	//convar for control
+volatile int tid=0;		//tid++ when a new waited thread created
+
+void init_cond_vars()
+{
+	for(int i=0; i<MAX_NTHREADS; i++)
+		cv[i] = new CondVar(&cm[i]);
+}
 
 void* reader(void* arg)
 {
@@ -130,8 +140,12 @@ void* reader(void* arg)
 	fprintf(stderr, "n_readers: %d\n", nreaders);
 	m.Unlock();		//unlock to allow concurrent reading
 	//read data
-	while(!can_read)
-		sleep(1);
+	if(arg){	//wait until continue command sending
+		int self = *(int*)arg;
+		cv[self]->Wait();
+	}
+	if(arg) delete (int*)arg;
+		
 	fprintf(stderr, "read: %s\n", data);
 	m.Lock();
 	nreaders--;
@@ -156,6 +170,12 @@ void* writer(void* arg)
 	}
 
 	//write
+	if(arg){
+		int self = *(int*)arg;
+		cv[self]->Wait();
+	}
+	if(arg) delete (int*)arg;
+		
 	char buf[10];
 	gen_random(buf, 6);
 	strcpy(data, buf);
@@ -172,8 +192,15 @@ typedef void* (*ThreadFunc)(void* arg);
 
 void StartThread(ThreadFunc func, void* arg) {
   pthread_t t;
+  int* p = NULL;
+  if(arg){
+	  tid++;
+	  p = new int(tid);
+	  fprintf(stderr, "start wait thread %d\n", tid);
+  }
+	  
   PthreadCall("start thread",
-              pthread_create(&t, NULL, func, arg));
+              pthread_create(&t, NULL, func, (void*)p));
 }
 
 
@@ -182,19 +209,26 @@ int main()
 	int n;
 	char cmd[100], key[100];
 
+	init_cond_vars();
+
 	while(1){
 		fprintf(stderr, "please input command:\n");
 		scanf("%s", cmd);
-		if(string(cmd) == "read"){
-			can_read = true;
-		}else if(string(cmd) == "noread"){
-			can_read = false;
-		}else if(string(cmd) == "start"){
+		if(string(cmd) == "cont"){	//cont <tid>, thread tid continue running
+			scanf("%d", &n);
+			cv[n]->Signal();
+		}else if(string(cmd) == "start"){ //start <n> <reader|writer>
 			scanf("%d", &n);
 			scanf("%s", key);
 			ThreadFunc func = string(key) == "reader"? reader : writer;
 			while(n--)
 				StartThread(func, NULL);
+		}else if(string(cmd) == "wstart"){ //wstart <n> <reader|writer>, start waited readers or writers
+			scanf("%d", &n);
+			scanf("%s", key);
+			ThreadFunc func = string(key) == "reader"? reader : writer;
+			while(n--)
+				StartThread(func, (void*)"wait");
 		}
 		else{
 			return 0;
