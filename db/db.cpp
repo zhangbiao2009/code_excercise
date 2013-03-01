@@ -485,13 +485,14 @@ class DList{
 		DList():no_reader_(&m_), no_writer_(&m_), nreaders_(0), nwriters_(0), nwaited_readers_(0), nwaited_writers_(0){}
 		~DList(){}
 
-		void Init(int idx_fd, int data_fd, off_t offset, map<size_t, Link>* free_node, map<size_t, Link>* free_data)
+		void Init(int idx_fd, int data_fd, off_t offset, map<size_t, Link>* free_node, map<size_t, Link>* free_data, LRUCache* cache)
 		{
 			idx_fd_ = idx_fd;
 			data_fd_ = data_fd;
 			head_offset_ = offset;
 			free_node_ = free_node;
 			free_data_ = free_data;
+			cache_ = cache;
 		}
 
 		bool Empty()
@@ -549,6 +550,7 @@ class DList{
 		bool Get(const string& key, string* val, StartThreadState* st)
 		{
 			MutexLock l(&m_);
+			bool found;
 			while(nwriters_>0){
 				nwaited_readers_++;
 				cerr <<"nwaited_readers_: "<<nwaited_readers_<<endl;
@@ -565,20 +567,28 @@ class DList{
 				cv[st->tid]->Wait();
 			}
 
-			Node* np = NULL;
-			bool found = Find(key, &np);
-			if(found){
-				*val = GetVal(np->GetValLink());
-				cout<<"("<<key<<", "<<*val<<")"<<endl;
-				delete np;
+			//返回对应key的val，如果不存在则返回false
+			if(cache_->Get(key, val)){	//in cache
+				found = true;
+				cerr<<"in cache key: "<<key<<endl;
+			}else{
+				cerr<<"not in cache key: "<<key<<endl;
+				Node* np = NULL;
+				found = Find(key, &np);
+				if(found){
+					*val = GetVal(np->GetValLink());
+					cache_->Set(key, *val);
+					delete np;
+				}
 			}
 
+			cerr<<"("<<key<<", "<<*val<<")"<<endl;
+			
 			m_.Lock();
 			nreaders_--;
 			cerr <<"nreaders_: "<<nreaders_<<endl;
 			if(nreaders_ == 0)
 				no_reader_.SignalAll();
-
 
 			return found;
 		}
@@ -670,8 +680,9 @@ class DList{
 			if(st->wait){	//wait until continue command sending
 				cv[st->tid]->Wait();
 			}
-
-			cout<<"write ("<<key<<", "<<val<<")"<<endl;
+			cache_->Del(key);
+			cerr<<"delete in cache, key: "<<key<<endl;
+			cerr<<"write data: ("<<key<<", "<<val<<")"<<endl;
 			bool ret;
 			if(func_name == "Add")
 				ret = AddInternal(key, val);
@@ -780,6 +791,7 @@ class DList{
 		int data_fd_;
 		map<size_t, Link>* free_node_;
 		map<size_t, Link>* free_data_;
+		LRUCache* cache_;
 		//use writers-preference algorithm to handle concurrent readers and writers
 		Mutex m_;
 		CondVar no_writer_;
@@ -843,7 +855,7 @@ class DB{
 				data_fd_ = ::Open(data_file_name, O_CREAT|O_RDWR, 0644);
 
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_);
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_, &cache_);
 					list_arr_[i].HeadWrite();
 				}
 			}else{
@@ -853,7 +865,7 @@ class DB{
 				//read list heads from file;
 				char* buf = new char[Link::Size()];
 				for(int i=0; i<HASH_TABLE_SIZE; i++){
-					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_);
+					list_arr_[i].Init(idx_fd_, data_fd_, i*Link::Size(), &free_node_, &free_data_, &cache_);
 					list_arr_[i].HeadRead();
 				}
 				delete[] buf;
@@ -880,7 +892,6 @@ class DB{
 
 		bool Set(const string& key, const string& val, StartThreadState* st)
 		{
-			//cache_.Del(key);
 			//update对应key的val，如果不存在则返回false
 			int h = hash(key.c_str());
 			return list_arr_[h].Set(key, val, st);
@@ -888,24 +899,15 @@ class DB{
 
 		bool Del(const string& key, StartThreadState* st)
 		{
-			//cache_.Del(key);
 			int h = hash(key.c_str());
 			return list_arr_[h].Del(key, st);
 		}
 
 		bool Get(const string& key, string* val, StartThreadState* st)
 		{
-			/*
-			//返回对应key的val，如果不存在则返回false
-			if(cache_.Get(key, val))	//in cache
-				return true;
-				*/
+			
 			int h = hash(key.c_str());
 			int ret = list_arr_[h].Get(key, val, st);
-			/*
-			if(ret)
-				cache_.Set(key, *val);
-				*/
 			return ret;
 		}
 
@@ -997,7 +999,7 @@ class DB{
 		map<size_t, Link> free_node_;	//entry: available space => link
 		map<size_t, Link> free_data_;
 
-		//LRUCache cache_;
+		LRUCache cache_;
 };
 
 void start_command(DB* db, bool wait)
