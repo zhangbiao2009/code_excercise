@@ -165,6 +165,44 @@ class MutexLock {		//scoped lock
   void operator=(const MutexLock&);
 };
 
+#define MAX_NTHREADS 100
+Mutex cm[MAX_NTHREADS];	//mutex for control
+CondVar* cv[MAX_NTHREADS];	//convar for control
+volatile int tid=0;		//tid++ when a new waited thread created
+
+void init_cond_vars()
+{
+	for(int i=0; i<MAX_NTHREADS; i++)
+		cv[i] = new CondVar(&cm[i]);
+}
+
+typedef void* (*ThreadFunc)(void* arg);
+
+class DB;
+struct StartThreadState{
+	StartThreadState() : wait(false), tid(-1){}
+	DB* db;
+	string func;
+	string key;
+	string val;
+	bool wait;
+	int tid;
+};
+
+void StartThread(ThreadFunc func, void* arg) {
+  pthread_t t;
+  int* p = NULL;
+  StartThreadState* st = reinterpret_cast<StartThreadState*>(arg);
+  if(st->wait){
+	  tid++;
+	  st->tid = tid;
+	  fprintf(stderr, "start wait thread %d\n", tid);
+  }
+	  
+  PthreadCall("start thread",
+              pthread_create(&t, NULL, func, arg));
+}
+
 //static const int HASH_TABLE_SIZE = 4993;	//一个素数
 static const int HASH_TABLE_SIZE = 2;	//一个素数
 static const int MAX_KEY_SIZE = 1024;
@@ -444,7 +482,7 @@ class Node{
 
 class DList{
 	public:
-		DList():no_reader_(&m_), no_writer_(&m_), nreaders_(0), nwriters_(0){}
+		DList():no_reader_(&m_), no_writer_(&m_), nreaders_(0), nwriters_(0), nwaited_readers_(0), nwaited_writers_(0){}
 		~DList(){}
 
 		void Init(int idx_fd, int data_fd, off_t offset, map<size_t, Link>* free_node, map<size_t, Link>* free_data, LRUCache* cache)
@@ -509,20 +547,32 @@ class DList{
 			return false;
 		}
 
-		bool Get(const string& key, string* val)
+		bool Get(const string& key, string* val, StartThreadState* st)
 		{
 			MutexLock l(&m_);
 			bool found;
 			while(nwriters_>0){
+				nwaited_readers_++;
+				cerr <<"nwaited_readers_: "<<nwaited_readers_<<endl;
 				no_writer_.Wait();	//wait until no active writers
+				nwaited_readers_--;
+				cerr <<"nwaited_readers_: "<<nwaited_readers_<<endl;
 			}
 			nreaders_++;
+			cerr <<"nreaders_: "<<nreaders_<<endl;
 			m_.Unlock();		//unlock to allow concurrent reading
+			//read data
+
+			if(st->wait){	//wait until continue command sending
+				cv[st->tid]->Wait();
+			}
 
 			//返回对应key的val，如果不存在则返回false
 			if(cache_->Get(key, val)){	//in cache
 				found = true;
+				cerr<<"in cache key: "<<key<<endl;
 			}else{
+				cerr<<"not in cache key: "<<key<<endl;
 				Node* np = NULL;
 				found = Find(key, &np);
 				if(found){
@@ -532,22 +582,25 @@ class DList{
 				}
 			}
 
+			cerr<<"("<<key<<", "<<*val<<")"<<endl;
+			
 			m_.Lock();
 			nreaders_--;
+			cerr <<"nreaders_: "<<nreaders_<<endl;
 			if(nreaders_ == 0)
 				no_reader_.SignalAll();
 
 			return found;
 		}
 
-		bool Add(const string& key, const string& val)
-		{ return Writer("Add", key, val); }
+		bool Add(const string& key, const string& val, StartThreadState* st)
+		{ return Writer("Add", key, val, st); }
 
-		bool Set(const string& key, const string& val)
-		{ return Writer("Set", key, val); }
+		bool Set(const string& key, const string& val, StartThreadState* st)
+		{ return Writer("Set", key, val, st); }
 
-		bool Del(const string& key)
-		{ return Writer("Del", key); }
+		bool Del(const string& key, StartThreadState* st)
+		{ return Writer("Del", key, "", st); }
 
 
 		//把head写入文件
@@ -610,16 +663,26 @@ class DList{
 		}
 
 		//writer encapsulation
-		bool Writer(const string func_name, const string& key, const string& val="")
+		bool Writer(const string func_name, const string& key, const string& val, StartThreadState* st)
 		{
 			MutexLock l(&m_);
 			nwriters_++;		//note: first increment, then wait
+			cerr <<"nwriters_: "<<nwriters_<<endl;
 			while(nreaders_ > 0){
+				nwaited_writers_++;
+				cerr <<"nwaited_writers_: "<<nwaited_writers_<<endl;
 				no_reader_.Wait();
+				nwaited_writers_--;
+				cerr <<"nwaited_writers_: "<<nwaited_writers_<<endl;
 			}
 
 			//write
+			if(st->wait){	//wait until continue command sending
+				cv[st->tid]->Wait();
+			}
 			cache_->Del(key);
+			cerr<<"delete in cache, key: "<<key<<endl;
+			cerr<<"write data: ("<<key<<", "<<val<<")"<<endl;
 			bool ret;
 			if(func_name == "Add")
 				ret = AddInternal(key, val);
@@ -631,7 +694,9 @@ class DList{
 				//impossible!
 			}
 
+			//fprintf(stderr, "writer data: %s\n", data);
 			nwriters_--;
+			cerr <<"nwriters_: "<<nwriters_<<endl;
 			if(nwriters_ == 0)
 				no_writer_.SignalAll();
 
@@ -733,6 +798,9 @@ class DList{
 		CondVar no_reader_;
 		int nreaders_;
 		int nwriters_;
+		int nwaited_readers_;
+		int nwaited_writers_;
+
 };
 
 class DB{
@@ -743,6 +811,35 @@ class DB{
 		~DB() {
 			Close();
 			delete[] list_arr_;
+		}
+
+		static void* SetThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Set(state->key, state->val, state);
+			delete state;
+			return NULL;
+		}
+
+		static void* AddThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Add(state->key, state->val, state);
+			delete state;
+			return NULL;
+		}
+		
+		static void* DelThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Del(state->key, state);
+			delete state;
+			return NULL;
+		}
+
+		static void* GetThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			string val;
+			state->db->Get(state->key, &val, state);
+			delete state;
+			return NULL;
 		}
 
 		bool Open(const string& dbname)
@@ -784,33 +881,33 @@ class DB{
 			WriteFreeMaps();
 		}
 
-		bool Add(const string& key, const string& val)
+		bool Add(const string& key, const string& val, StartThreadState* st)
 		{
 			//先查找，如果记录已经存在，则返回添加失败，暂不支持修改操作
 			//直接加入到data文件最后
 			//然后根据hash值，找到对应的位置，更新idx文件
 			int h = hash(key.c_str());
-			return list_arr_[h].Add(key, val);
+			return list_arr_[h].Add(key, val, st);
 		}
 
-		bool Set(const string& key, const string& val)
+		bool Set(const string& key, const string& val, StartThreadState* st)
 		{
 			//update对应key的val，如果不存在则返回false
 			int h = hash(key.c_str());
-			return list_arr_[h].Set(key, val);
+			return list_arr_[h].Set(key, val, st);
 		}
 
-		bool Del(const string& key)
+		bool Del(const string& key, StartThreadState* st)
 		{
 			int h = hash(key.c_str());
-			return list_arr_[h].Del(key);
+			return list_arr_[h].Del(key, st);
 		}
 
-		bool Get(const string& key, string* val)
+		bool Get(const string& key, string* val, StartThreadState* st)
 		{
 			
 			int h = hash(key.c_str());
-			int ret = list_arr_[h].Get(key, val);
+			int ret = list_arr_[h].Get(key, val, st);
 			return ret;
 		}
 
@@ -824,10 +921,11 @@ class DB{
 			}
 		}
 		
+		/*
 		void PrintCache()
 		{
 			cache_.Print();
-		}
+		}*/
 
 		void PrintFreeMap()
 		{
@@ -904,8 +1002,35 @@ class DB{
 		LRUCache cache_;
 };
 
+void start_command(DB* db, bool wait)
+{
+	StartThreadState* st = new StartThreadState;
+	st->db = db;
+	st->wait = wait;
+	cin>>st->func;
+	cin>>st->key;
+
+	string func = st->func;
+
+	if(func == "set"){
+		cin>>st->val;
+		StartThread(&DB::SetThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "add"){
+		cin>>st->val;
+		StartThread(&DB::AddThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "del"){
+		StartThread(&DB::DelThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "get"){
+		StartThread(&DB::GetThreadWrapper, reinterpret_cast<void*>(st));
+	}else{
+		cerr<<"unknown function: "<<func<<endl;
+	}
+}
+
 int main()
 {
+	init_cond_vars();
+
 	string cmd, func, key, val;
 	int n;
 
@@ -917,7 +1042,7 @@ int main()
 	while(1){
 		cout<<"please input command:"<<endl;
 		cin>>cmd;
-
+		/*
 		if(cmd == "add"){
 			cin>>key>>val;
 			if(!db.Add(key, val))
@@ -939,9 +1064,20 @@ int main()
 				cout<<"("<<key<<", "<<val<<")"<<endl;
 			else
 				cout<<"no such key: "<<key<<endl;
+		}
+		else */if(cmd == "start"){	//start <get|set|add> <key> [val], create a new thread to execute
+			start_command(&db, false);
+		}else if(cmd == "wstart"){ 	//wstart <get|set|add> <key> [val] , create a new waited thread 
+			start_command(&db, true);
+		}else if(string(cmd) == "cont"){	//cont <tid>, thread tid continue running
+			cin>>n;
+			cv[n]->Signal();
+		}else if (cmd == "print"){
+			db.Print();
 		}else{
 			return 0;
 		}
+		//db.PrintCache();
 	}
 
 	db.Close();
