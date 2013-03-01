@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -15,125 +16,6 @@ using namespace std;
 /*
    一个简单的key value DB
  */
-
-//static const int HASH_TABLE_SIZE = 4993;	//一个素数
-static const int HASH_TABLE_SIZE = 2;	//一个素数
-static const int MAX_KEY_SIZE = 1024;
-static const int MAX_VAL_SIZE = 1024*1024;
-const int MAX_CACHE_SIZE = 5;
-
-class LRUCache{
-	public:
-		struct Node{
-			string key;
-			string val;
-			struct Node* prev;
-			struct Node* next;
-
-			static Node* NewNode(const string& key, const string& val)
-			{
-				Node* np = new Node;
-				np->key = key;
-				np->val = val;
-				np->prev = np->next = np; //point to itself
-				return np;
-			}
-		};
-		
-		LRUCache()
-		{
-			head_.prev = head_.next = &head_;
-		}
-		~LRUCache(){}
-
-		//add or replace
-		void Set(const string& key, const string& val)
-		{
-			Node* node = Find(key);
-			if(!node){
-				node = Node::NewNode(key, val);
-				if(cache_.size() >= MAX_CACHE_SIZE){
-					//evict an entry according to LRU policy (from list tail)
-					Node* tmp = head_.prev;
-					RemoveFromList(tmp);
-					cache_.erase(tmp->key);
-					delete tmp;
-				} 
-				//store the address in the cache
-				cache_[key] = node;
-			}else
-				node->val = val; //set the value
-
-			//put it in list front
-			Promote(node);
-		}
-
-		void Del(const string& key)
-		{
-			Node* np = Find(key);
-			if(np){
-				RemoveFromList(np);
-				cache_.erase(np->key);
-				delete np;
-			}
-		}
-
-		bool Get(const string& key, string* val)
-		{
-			Node* np = Find(key);
-			if(np){
-				//put it in list front
-				Promote(np);
-				*val = np->val;
-				return true;
-			}
-			return false;
-		}
-
-		void Print()
-		{
-			cout<<"current cache status:"<<endl;
-			for(Node* np=head_.next; np!=&head_; np=np->next){
-				cout<<"("<<np->key<<", "<<np->val<<") ";
-			}
-			cout<<endl;
-		}
-
-	private:
-
-		Node* Find(const string& key)
-		{
-			map<string, Node*>::iterator iter= cache_.find(key);
-			if(iter == cache_.end())
-				return NULL;
-			return iter->second;
-		}
-
-		void RemoveFromList(Node* node)
-		{
-			node->prev->next = node->next;
-			node->next->prev = node->prev;
-		}
-
-		//put it to the front
-		void Promote(Node* node)
-		{
-			if(node->prev != node && node->next != node){
-				//not a new node, already in the list, remove it from the list
-				RemoveFromList(node);
-			}
-
-			//insert node in the front
-			node->next = head_.next;
-			node->prev = &head_;
-			node->prev->next = node;
-			node->next->prev = node;
-		}
-
-		//circular doubly linked list
-		Node head_;
-		map<string, Node*> cache_;
-};
 
 int Open(const string& pathname, int flags)
 {
@@ -202,6 +84,248 @@ int Unlink(const string& pathname)
 	}
 }
 
+class CondVar;
+
+class Mutex {
+ public:
+  Mutex();
+  ~Mutex();
+
+  void Lock();
+  void Unlock();
+  void AssertHeld() { }
+
+ private:
+  friend class CondVar;
+  pthread_mutex_t mu_;
+
+  // No copying
+  Mutex(const Mutex&);
+  void operator=(const Mutex&);
+};
+
+class CondVar {
+ public:
+  explicit CondVar(Mutex* mu);
+  ~CondVar();
+  void Wait();
+  void Signal();
+  void SignalAll();
+ private:
+  pthread_cond_t cv_;
+  Mutex* mu_;
+};
+
+static void PthreadCall(const char* label, int result) {
+  if (result != 0) {
+    fprintf(stderr, "pthread %s: %s\n", label, strerror(result));
+    abort();
+  }
+}
+
+Mutex::Mutex() { PthreadCall("init mutex", pthread_mutex_init(&mu_, NULL)); }
+
+Mutex::~Mutex() { PthreadCall("destroy mutex", pthread_mutex_destroy(&mu_)); }
+
+void Mutex::Lock() { PthreadCall("lock", pthread_mutex_lock(&mu_)); }
+
+void Mutex::Unlock() { PthreadCall("unlock", pthread_mutex_unlock(&mu_)); }
+
+CondVar::CondVar(Mutex* mu)
+    : mu_(mu) {
+    PthreadCall("init cv", pthread_cond_init(&cv_, NULL));
+}
+
+CondVar::~CondVar() { PthreadCall("destroy cv", pthread_cond_destroy(&cv_)); }
+
+void CondVar::Wait() {
+  PthreadCall("wait", pthread_cond_wait(&cv_, &mu_->mu_));
+}
+
+void CondVar::Signal() {
+  PthreadCall("signal", pthread_cond_signal(&cv_));
+}
+
+void CondVar::SignalAll() {
+  PthreadCall("broadcast", pthread_cond_broadcast(&cv_));
+}
+
+class MutexLock {		//scoped lock
+ public:
+  explicit MutexLock(Mutex *mu)
+      : mu_(mu)  {
+    this->mu_->Lock();
+  }
+  ~MutexLock() { this->mu_->Unlock(); }
+
+ private:
+  Mutex *const mu_;
+  // No copying allowed
+  MutexLock(const MutexLock&);
+  void operator=(const MutexLock&);
+};
+
+#define MAX_NTHREADS 100
+Mutex cm[MAX_NTHREADS];	//mutex for control
+CondVar* cv[MAX_NTHREADS];	//convar for control
+volatile int tid=0;		//tid++ when a new waited thread created
+
+void init_cond_vars()
+{
+	for(int i=0; i<MAX_NTHREADS; i++)
+		cv[i] = new CondVar(&cm[i]);
+}
+
+typedef void* (*ThreadFunc)(void* arg);
+
+class DB;
+struct StartThreadState{
+	StartThreadState() : wait(false), tid(-1){}
+	DB* db;
+	string func;
+	string key;
+	string val;
+	bool wait;
+	int tid;
+};
+
+void StartThread(ThreadFunc func, void* arg) {
+  pthread_t t;
+  int* p = NULL;
+  StartThreadState* st = reinterpret_cast<StartThreadState*>(arg);
+  if(st->wait){
+	  tid++;
+	  st->tid = tid;
+	  fprintf(stderr, "start wait thread %d\n", tid);
+  }
+	  
+  PthreadCall("start thread",
+              pthread_create(&t, NULL, func, arg));
+}
+
+//static const int HASH_TABLE_SIZE = 4993;	//一个素数
+static const int HASH_TABLE_SIZE = 2;	//一个素数
+static const int MAX_KEY_SIZE = 1024;
+static const int MAX_VAL_SIZE = 1024*1024;
+const int MAX_CACHE_SIZE = 5;
+
+class LRUCache{
+	public:
+		struct Node{
+			string key;
+			string val;
+			struct Node* prev;
+			struct Node* next;
+
+			static Node* NewNode(const string& key, const string& val)
+			{
+				Node* np = new Node;
+				np->key = key;
+				np->val = val;
+				np->prev = np->next = np; //point to itself
+				return np;
+			}
+		};
+		
+		LRUCache()
+		{
+			head_.prev = head_.next = &head_;
+		}
+		~LRUCache(){}
+
+		//add or replace
+		void Set(const string& key, const string& val)
+		{
+			MutexLock l(&m_);
+			Node* node = Find(key);
+			if(!node){
+				node = Node::NewNode(key, val);
+				if(cache_.size() >= MAX_CACHE_SIZE){
+					//evict an entry according to LRU policy (from list tail)
+					Node* tmp = head_.prev;
+					RemoveFromList(tmp);
+					cache_.erase(tmp->key);
+					delete tmp;
+				} 
+				//store the address in the cache
+				cache_[key] = node;
+			}else
+				node->val = val; //set the value
+
+			//put it in list front
+			Promote(node);
+		}
+
+		void Del(const string& key)
+		{
+			MutexLock l(&m_);
+			Node* np = Find(key);
+			if(np){
+				RemoveFromList(np);
+				cache_.erase(np->key);
+				delete np;
+			}
+		}
+
+		bool Get(const string& key, string* val)
+		{
+			MutexLock l(&m_);
+			Node* np = Find(key);
+			if(np){
+				//put it in list front
+				Promote(np);
+				*val = np->val;
+				return true;
+			}
+			return false;
+		}
+
+		void Print()
+		{
+			MutexLock l(&m_);
+			cout<<"current cache status:"<<endl;
+			for(Node* np=head_.next; np!=&head_; np=np->next){
+				cout<<"("<<np->key<<", "<<np->val<<") ";
+			}
+			cout<<endl;
+		}
+
+	private:
+
+		Node* Find(const string& key)
+		{
+			map<string, Node*>::iterator iter= cache_.find(key);
+			if(iter == cache_.end())
+				return NULL;
+			return iter->second;
+		}
+
+		void RemoveFromList(Node* node)
+		{
+			node->prev->next = node->next;
+			node->next->prev = node->prev;
+		}
+
+		//put it to the front
+		void Promote(Node* node)
+		{
+			if(node->prev != node && node->next != node){
+				//noe a new node, already in the list, remove it from the list
+				RemoveFromList(node);
+			}
+
+			//insert node in the front
+			node->next = head_.next;
+			node->prev = &head_;
+			node->prev->next = node;
+			node->next->prev = node;
+		}
+
+		//circular doubly linked list
+		Node head_;
+		map<string, Node*> cache_;
+		Mutex m_;
+};
 
 class Link{
 	public:
@@ -358,7 +482,7 @@ class Node{
 
 class DList{
 	public:
-		DList(){}
+		DList():no_reader_(&m_), no_writer_(&m_), nreaders_(0), nwriters_(0), nwaited_readers_(0), nwaited_writers_(0){}
 		~DList(){}
 
 		void Init(int idx_fd, int data_fd, off_t offset, map<size_t, Link>* free_node, map<size_t, Link>* free_data)
@@ -402,7 +526,7 @@ class DList{
 					if(lp) *lp = l;
 					return true;
 				}
-				
+
 				if(prev_npp && *prev_npp)
 					delete *prev_npp;
 
@@ -422,97 +546,52 @@ class DList{
 			return false;
 		}
 
-		bool Get(const string& key, string* val){
+		bool Get(const string& key, string* val, StartThreadState* st)
+		{
+			MutexLock l(&m_);
+			while(nwriters_>0){
+				nwaited_readers_++;
+				cerr <<"nwaited_readers_: "<<nwaited_readers_<<endl;
+				no_writer_.Wait();	//wait until no active writers
+				nwaited_readers_--;
+				cerr <<"nwaited_readers_: "<<nwaited_readers_<<endl;
+			}
+			nreaders_++;
+			cerr <<"nreaders_: "<<nreaders_<<endl;
+			m_.Unlock();		//unlock to allow concurrent reading
+			//read data
+
+			if(st->wait){	//wait until continue command sending
+				cv[st->tid]->Wait();
+			}
+
 			Node* np = NULL;
 			bool found = Find(key, &np);
-			if(!found) 
-				return false;
-			*val = GetVal(np->GetValLink());
-			delete np;
-			return true;
-		}
-
-		bool Add(const string& key, const string& val)
-		{
-			if(Find(key))	//alread exist
-				return false;
-
-			off_t offset;
-			size_t total_size;
-
-			Link val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
-
-			Node n(true, key, val_link, head_);
-			char* node_rep = Node::Encode(&n);
-
-			//新的链表头结点信息
-			head_ = FindRooMAndWrite(node_rep, n.Size(), idx_fd_, free_node_);
-			HeadWrite();
-
-			delete[] node_rep;
-			return true;
-		}
-
-		bool Set(const string& key, const string& val)
-		{
-			//update对应key的val，如果不存在则返回false
-			Node* np = NULL;
-			Link l;
-			bool found = Find(key, &np, &l);
-			if(!found) 
-				return false;
-
-			Link val_link = np->GetValLink();
-			if(val_link.GetTotalSize() >= val.length()){ 	//the old val has enough space, write new val at original offset
-				Lseek(data_fd_, val_link.GetOffset(), SEEK_SET);
-				val_link.SetSize(val.length());
-			}else{ 	//space is not enough, write the new val at the end of file
-				(*free_data_)[val_link.GetTotalSize()] = val_link;		//add original data space to free data map
-				val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
+			if(found){
+				*val = GetVal(np->GetValLink());
+				cout<<"("<<key<<", "<<*val<<")"<<endl;
+				delete np;
 			}
 
-			Write(data_fd_, val.c_str(), val.length());
-			np->SetValLink(val_link);
-			NodeWriteInplace(np, l.GetOffset());
+			m_.Lock();
+			nreaders_--;
+			cerr <<"nreaders_: "<<nreaders_<<endl;
+			if(nreaders_ == 0)
+				no_reader_.SignalAll();
 
-			delete np;
-			return true;
+
+			return found;
 		}
 
-		bool Del(const string& key)
-		{
-			Node* np = NULL;
-			Node* prev_np = NULL;
-			Link prev_l, l;
-			bool found = Find(key, &np, &l, &prev_np, &prev_l);
-			if(!found) 
-				return false;
+		bool Add(const string& key, const string& val, StartThreadState* st)
+		{ return Writer("Add", key, val, st); }
 
-			if(!prev_np){	
-				//the found node is the first node of the list, so update the head
-				head_ = np->GetNext();
-				HeadWrite();
-			}else{	
-				//update the link info in prev node
-				prev_np->SetNext(np->GetNext());
-				NodeWriteInplace(prev_np, prev_l.GetOffset());
-			}
-			//add removed node info to free node map
-			(*free_node_)[l.GetTotalSize()] = l;
-			//add removed corresponding data space to free data map
-			Link val_link = np->GetValLink();
-			(*free_data_)[val_link.GetTotalSize()] = val_link;
+		bool Set(const string& key, const string& val, StartThreadState* st)
+		{ return Writer("Set", key, val, st); }
 
-			/*
-			np->SetValid(false);
-			NodeWriteInplace(np, l.offset);
-			*/
-			delete np;
-			if(prev_np)
-				delete prev_np;
+		bool Del(const string& key, StartThreadState* st)
+		{ return Writer("Del", key, "", st); }
 
-			return true;
-		}
 
 		//把head写入文件
 		void HeadWrite() { Link::Write(head_, idx_fd_, head_offset_); }
@@ -573,14 +652,144 @@ class DList{
 			return l;
 		}
 
+		//writer encapsulation
+		bool Writer(const string func_name, const string& key, const string& val, StartThreadState* st)
+		{
+			MutexLock l(&m_);
+			nwriters_++;		//note: first increment, then wait
+			cerr <<"nwriters_: "<<nwriters_<<endl;
+			while(nreaders_ > 0){
+				nwaited_writers_++;
+				cerr <<"nwaited_writers_: "<<nwaited_writers_<<endl;
+				no_reader_.Wait();
+				nwaited_writers_--;
+				cerr <<"nwaited_writers_: "<<nwaited_writers_<<endl;
+			}
+
+			//write
+			if(st->wait){	//wait until continue command sending
+				cv[st->tid]->Wait();
+			}
+
+			cout<<"write ("<<key<<", "<<val<<")"<<endl;
+			bool ret;
+			if(func_name == "Add")
+				ret = AddInternal(key, val);
+			else if(func_name =="Set")
+				ret = SetInternal(key, val);
+			else if(func_name =="Del")
+				ret = DelInternal(key);
+			else{
+				//impossible!
+			}
+
+			//fprintf(stderr, "writer data: %s\n", data);
+			nwriters_--;
+			cerr <<"nwriters_: "<<nwriters_<<endl;
+			if(nwriters_ == 0)
+				no_writer_.SignalAll();
+
+			return ret;
+		}
+
+		bool AddInternal(const string& key, const string& val)
+		{
+			if(Find(key))	//alread exist
+				return false;
+
+			off_t offset;
+			size_t total_size;
+
+			Link val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
+
+			Node n(true, key, val_link, head_);
+			char* node_rep = Node::Encode(&n);
+
+			//新的链表头结点信息
+			head_ = FindRooMAndWrite(node_rep, n.Size(), idx_fd_, free_node_);
+			HeadWrite();
+
+			delete[] node_rep;
+			return true;
+		}
+
+		bool SetInternal(const string& key, const string& val)
+		{
+			//update对应key的val，如果不存在则返回false
+			Node* np = NULL;
+			Link l;
+			bool found = Find(key, &np, &l);
+			if(!found) 
+				return false;
+
+			Link val_link = np->GetValLink();
+			if(val_link.GetTotalSize() >= val.length()){ 	//the old val has enough space, write new val at original offset
+				Lseek(data_fd_, val_link.GetOffset(), SEEK_SET);
+				val_link.SetSize(val.length());
+			}else{ 	//space is not enough, write the new val at the end of file
+				(*free_data_)[val_link.GetTotalSize()] = val_link;		//add original data space to free data map
+				val_link = FindRooMAndWrite(val.c_str(), val.length(), data_fd_, free_data_);
+			}
+
+			Write(data_fd_, val.c_str(), val.length());
+			np->SetValLink(val_link);
+			NodeWriteInplace(np, l.GetOffset());
+
+			delete np;
+			return true;
+		}
+
+		bool DelInternal(const string& key)
+		{
+			Node* np = NULL;
+			Node* prev_np = NULL;
+			Link prev_l, l;
+			bool found = Find(key, &np, &l, &prev_np, &prev_l);
+			if(!found) 
+				return false;
+
+			if(!prev_np){	
+				//the found node is the first node of the list, so update the head
+				head_ = np->GetNext();
+				HeadWrite();
+			}else{	
+				//update the link info in prev node
+				prev_np->SetNext(np->GetNext());
+				NodeWriteInplace(prev_np, prev_l.GetOffset());
+			}
+			//add removed node info to free node map
+			(*free_node_)[l.GetTotalSize()] = l;
+			//add removed corresponding data space to free data map
+			Link val_link = np->GetValLink();
+			(*free_data_)[val_link.GetTotalSize()] = val_link;
+
+			/*
+			   np->SetValid(false);
+			   NodeWriteInplace(np, l.offset);
+			 */
+			delete np;
+			if(prev_np)
+				delete prev_np;
+
+			return true;
+		}
+
 		Link head_;
 		off_t head_offset_;
 		int idx_fd_;
 		int data_fd_;
 		map<size_t, Link>* free_node_;
 		map<size_t, Link>* free_data_;
-};
+		//use writers-preference algorithm to handle concurrent readers and writers
+		Mutex m_;
+		CondVar no_writer_;
+		CondVar no_reader_;
+		int nreaders_;
+		int nwriters_;
+		int nwaited_readers_;
+		int nwaited_writers_;
 
+};
 
 class DB{
 	public:
@@ -590,6 +799,35 @@ class DB{
 		~DB() {
 			Close();
 			delete[] list_arr_;
+		}
+
+		static void* SetThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Set(state->key, state->val, state);
+			delete state;
+			return NULL;
+		}
+
+		static void* AddThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Add(state->key, state->val, state);
+			delete state;
+			return NULL;
+		}
+		
+		static void* DelThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			state->db->Del(state->key, state);
+			delete state;
+			return NULL;
+		}
+
+		static void* GetThreadWrapper(void* arg) {
+			StartThreadState* state = reinterpret_cast<StartThreadState*>(arg);
+			string val;
+			state->db->Get(state->key, &val, state);
+			delete state;
+			return NULL;
 		}
 
 		bool Open(const string& dbname)
@@ -631,39 +869,43 @@ class DB{
 			WriteFreeMaps();
 		}
 
-		bool Add(const string& key, const string& val)
+		bool Add(const string& key, const string& val, StartThreadState* st)
 		{
 			//先查找，如果记录已经存在，则返回添加失败，暂不支持修改操作
 			//直接加入到data文件最后
 			//然后根据hash值，找到对应的位置，更新idx文件
 			int h = hash(key.c_str());
-			return list_arr_[h].Add(key, val);
+			return list_arr_[h].Add(key, val, st);
 		}
 
-		bool Set(const string& key, const string& val)
+		bool Set(const string& key, const string& val, StartThreadState* st)
 		{
-			cache_.Del(key);
+			//cache_.Del(key);
 			//update对应key的val，如果不存在则返回false
 			int h = hash(key.c_str());
-			return list_arr_[h].Set(key, val);
+			return list_arr_[h].Set(key, val, st);
 		}
 
-		bool Del(const string& key)
+		bool Del(const string& key, StartThreadState* st)
 		{
-			cache_.Del(key);
+			//cache_.Del(key);
 			int h = hash(key.c_str());
-			return list_arr_[h].Del(key);
+			return list_arr_[h].Del(key, st);
 		}
 
-		bool Get(const string& key, string* val)
+		bool Get(const string& key, string* val, StartThreadState* st)
 		{
+			/*
 			//返回对应key的val，如果不存在则返回false
 			if(cache_.Get(key, val))	//in cache
 				return true;
+				*/
 			int h = hash(key.c_str());
-			int ret = list_arr_[h].Get(key, val);
+			int ret = list_arr_[h].Get(key, val, st);
+			/*
 			if(ret)
 				cache_.Set(key, *val);
+				*/
 			return ret;
 		}
 
@@ -677,10 +919,11 @@ class DB{
 			}
 		}
 		
+		/*
 		void PrintCache()
 		{
 			cache_.Print();
-		}
+		}*/
 
 		void PrintFreeMap()
 		{
@@ -754,13 +997,40 @@ class DB{
 		map<size_t, Link> free_node_;	//entry: available space => link
 		map<size_t, Link> free_data_;
 
-		LRUCache cache_;
+		//LRUCache cache_;
 };
 
+void start_command(DB* db, bool wait)
+{
+	StartThreadState* st = new StartThreadState;
+	st->db = db;
+	st->wait = wait;
+	cin>>st->func;
+	cin>>st->key;
+
+	string func = st->func;
+
+	if(func == "set"){
+		cin>>st->val;
+		StartThread(&DB::SetThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "add"){
+		cin>>st->val;
+		StartThread(&DB::AddThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "del"){
+		StartThread(&DB::DelThreadWrapper, reinterpret_cast<void*>(st));
+	} else if (func == "get"){
+		StartThread(&DB::GetThreadWrapper, reinterpret_cast<void*>(st));
+	}else{
+		cerr<<"unknown function: "<<func<<endl;
+	}
+}
 
 int main()
 {
-	string cmd, key, val;
+	init_cond_vars();
+
+	string cmd, func, key, val;
+	int n;
 
 	DB db;
 	if(!db.Open("mydb")){
@@ -770,6 +1040,7 @@ int main()
 	while(1){
 		cout<<"please input command:"<<endl;
 		cin>>cmd;
+		/*
 		if(cmd == "add"){
 			cin>>key>>val;
 			if(!db.Add(key, val))
@@ -792,10 +1063,19 @@ int main()
 			else
 				cout<<"no such key: "<<key<<endl;
 		}
-		else{
+		else */if(cmd == "start"){	//start <get|set|add> <key> [val], create a new thread to execute
+			start_command(&db, false);
+		}else if(cmd == "wstart"){ 	//wstart <get|set|add> <key> [val] , create a new waited thread 
+			start_command(&db, true);
+		}else if(string(cmd) == "cont"){	//cont <tid>, thread tid continue running
+			cin>>n;
+			cv[n]->Signal();
+		}else if (cmd == "print"){
+			db.Print();
+		}else{
 			return 0;
 		}
-		db.PrintCache();
+		//db.PrintCache();
 	}
 
 	db.Close();
