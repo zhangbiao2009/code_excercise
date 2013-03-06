@@ -18,7 +18,8 @@ local.properties
 *.exe
 *.data
 *.idx
-a.out
+*.txt
+*.out
 
 # External tool builders
 .externalToolBuilders/

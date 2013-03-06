@@ -2,6 +2,7 @@
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <errno.h>
+#include <signal.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -42,6 +43,8 @@ int main()
 
 	int listenfd;
 	int epfd; 
+
+	signal(SIGPIPE, SIG_IGN);	//ignore sigpipe to prevent server shut down
 
 	if((listenfd = anetTcpServer(neterr, 9999, NULL)) == ANET_ERR){
 		fprintf(stderr, "%s\n", neterr);

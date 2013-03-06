@@ -1,5 +1,5 @@
 all: server client
 server: server.cpp anet.cpp 
-	g++ -g server.cpp anet.cpp -o server
+	g++ -g server.cpp anet.cpp -o server.out
 client: client.cpp anet.cpp
-	g++ -g client.cpp anet.cpp -o client
+	g++ -g client.cpp anet.cpp -o client.out
