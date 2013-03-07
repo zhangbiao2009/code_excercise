@@ -1,5 +1,7 @@
 all: server client
 server: server.cpp anet.cpp 
-	g++ -g server.cpp anet.cpp -o server.out
+	g++ -Wall -g $^ -o $@
 client: client.cpp anet.cpp
-	g++ -g client.cpp anet.cpp -o client.out
+	g++ -Wall -g $^ -o $@
+clean:
+	@rm -f server client

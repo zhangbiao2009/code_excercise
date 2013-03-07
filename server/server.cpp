@@ -12,14 +12,29 @@ using namespace std;
 
 #define MAX_CLIENTS 100
 #define MAX_BUFLEN 10000
+#define MAX_CMD_PARTS 3
 
+enum State{CMD_CHECK, CMD_PARSE, GET_CMD, SET_CMD};
 struct client{
+	client():fd(-1),rpos(0),cmd_end(NULL),state(CMD_CHECK),wpos(0),wend(0){}
+	void reset_for_next_read(){
+		rpos = 0;
+		cmd_end = NULL;
+		state = CMD_CHECK;
+	}
+	void reset_for_next_write(){
+		wpos = 0;
+		wend = 0;
+	}
 	int fd;
-	char readbuf[MAX_BUFLEN];		//+1 for the end of C style string
+	char readbuf[MAX_BUFLEN];
+	int rpos;		//next pos which input need to store
+	char* cmd_end;		//for command parsing, init as NULL
+	char* cmd_part[MAX_CMD_PARTS];  //parsed command
+	State state;
 	char writebuf[MAX_BUFLEN];
-	int rpos;
-	int wpos;
-	int wend;
+	int wpos;		//next pos which need to output 
+	int wend;		//the end of the data in write buf, equals to the array index of the last character + 1
 };
 
 /*
@@ -35,6 +50,61 @@ typedef struct aeFileEvent {
 struct epoll_event events[MAX_CLIENTS];
 struct client clients[MAX_CLIENTS];
 int nclients;
+
+int handle_read_event(client* c)
+{
+	while(1){
+		switch(c->state){
+			case CMD_CHECK:
+				c->cmd_end = (char*)memchr(c->readbuf, '\n', c->rpos);
+				if(!c->cmd_end)	//not a complete cmd
+					return 0;
+
+				//received a complete cmd
+				if(*(c->cmd_end-1) != '\r')	//bad format
+					return -1;
+				c->state = CMD_PARSE;
+				break;
+			case CMD_PARSE:
+				{
+					//parse command
+					int npart = 0;
+					*(c->cmd_end-1) = '\0';	//set for strtok
+					for (char* p=c->readbuf; ; p = NULL) {
+						char* token = strtok(p, " ");
+						if (token == NULL)
+							break;
+						c->cmd_part[npart++] = token;
+					}
+					if(strcmp(c->cmd_part[0], "get") == 0) //get command
+						c->state = GET_CMD;
+					else if(strcmp(c->cmd_part[0], "set") == 0)
+						c->state = SET_CMD;
+					else return -1;		//bad command
+					break;
+				}
+			case GET_CMD:
+				sprintf(c->writebuf, "get key: %s, value: val1\r\n", c->cmd_part[1]);
+				c->wend = strlen(c->writebuf) + 1;		//ignore '\0' in the end of C style string
+				c->wpos = 0;
+				return 1;
+				break;
+			case SET_CMD:
+				{
+					int bytes = atoi(c->cmd_part[2]);	//bytes of data block, to do: what if byte is 0 ?
+					if(c->readbuf+c->rpos-(c->cmd_end+1) < bytes + 2) //data not received completelly, +2 for '\r\n'
+						return 0;
+
+					c->readbuf[c->rpos-2] = '\0'; //replace '\r' with '\0', make the data as a C style string
+					sprintf(c->writebuf, "set key: %s, value: %s\r\n", c->cmd_part[1], c->cmd_end+1);
+					c->wend = strlen(c->writebuf) + 1;
+					c->wpos = 0;
+					return 1;
+					break;
+				}
+		}
+	}
+}
 
 int main()
 {
@@ -115,17 +185,18 @@ int main()
 					close(fd);  
 					nclients--;
 				}
-				if(rbuf[clients[fd].rpos-2] == '\n' && rbuf[clients[fd].rpos-1] == '\0'){ //read a line finished, [rpos-1] should be '\0'
-					//process the request
-					strcpy(clients[fd].writebuf, rbuf); //copy to write buf for response
-					//fprintf(stderr, "from fd %d, received : %s", fd, rbuf);  
-					clients[fd].wend = clients[fd].rpos ;
-
-					clients[fd].rpos = 0;	//reset rpos
+				int res = handle_read_event(&clients[fd]);
+				if(res<0){ //error happened
+					fprintf(stderr, "an error happened\n");  
+					close(fd);  
+					nclients--;
+				}else if(res>0){	//read event is handled successfully
+					clients[fd].reset_for_next_read();
 					//register as write event
 					ev.data.fd=fd;  
 					ev.events=EPOLLOUT;  
 					epoll_ctl(epfd, EPOLL_CTL_MOD, fd, &ev);  
+				}else{ //res == 0, needs more data, continue reading
 				}
             }
             else if(events[i].events & EPOLLOUT)  
@@ -145,9 +216,7 @@ int main()
 
 				if(wend == clients[fd].wpos){ //write finished
 					//fprintf(stderr, "write to fd %d, content: %s", fd, wbuf);  
-					clients[fd].wpos = 0;
-					clients[fd].wend = 0;
-
+					//no need to rest for next write cause read event handler will do it
 					//register as read event
 					ev.data.fd=fd;  
 					ev.events=EPOLLIN;  
