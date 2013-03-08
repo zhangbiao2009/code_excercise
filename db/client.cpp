@@ -1,3 +1,7 @@
+/*
+todo: implement an c client for DB
+ */
+
 #include "anet.h"
 #include <netinet/in.h>
 #include <errno.h>

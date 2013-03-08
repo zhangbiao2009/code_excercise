@@ -1,123 +1,56 @@
+/*
+using a memcached like protocol:
+
+get <key>\r\n
+-----------------------
+value <key> <nbytes>\r\n
+<data block>\r\n
+|NOT_FOUND\r\n
+
+
+del <key>\r\n
+-----------------------
+DELETED|NOT_FOUND\r\n
+
+
+add <key> <nbytes>\r\n
+<data block>\r\n
+-----------------------
+STORED|EXISTS\r\n
+
+
+set <key> <nbytes>\r\n
+<data block>\r\n
+-----------------------
+STORED|NOT_FOUND\r\n
+
+*/
+
 #include "anet.h"
+#include "utils.h"
+#include "db.h"
 #include <netinet/in.h>
 #include <sys/epoll.h>
 #include <errno.h>
 #include <signal.h>
-#include <pthread.h>
-#include <unistd.h>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
 #include <iostream>
 #include <string>
 #include <map>
-#include <deque>
 
 using namespace std;
 
-class CondVar;
+DB db;
 
-class Mutex {
- public:
-  Mutex();
-  ~Mutex();
-
-  void Lock();
-  void Unlock();
-  void AssertHeld() { }
-
- private:
-  friend class CondVar;
-  pthread_mutex_t mu_;
-
-  // No copying
-  Mutex(const Mutex&);
-  void operator=(const Mutex&);
-};
-
-class CondVar {
- public:
-  explicit CondVar(Mutex* mu);
-  ~CondVar();
-  void Wait();
-  void Signal();
-  void SignalAll();
- private:
-  pthread_cond_t cv_;
-  Mutex* mu_;
-};
-
-static void PthreadCall(const char* label, int result) {
-  if (result != 0) {
-    fprintf(stderr, "pthread %s: %s\n", label, strerror(result));
-    abort();
-  }
-}
-
-Mutex::Mutex() { PthreadCall("init mutex", pthread_mutex_init(&mu_, NULL)); }
-
-Mutex::~Mutex() { PthreadCall("destroy mutex", pthread_mutex_destroy(&mu_)); }
-
-void Mutex::Lock() { PthreadCall("lock", pthread_mutex_lock(&mu_)); }
-
-void Mutex::Unlock() { PthreadCall("unlock", pthread_mutex_unlock(&mu_)); }
-
-CondVar::CondVar(Mutex* mu)
-    : mu_(mu) {
-    PthreadCall("init cv", pthread_cond_init(&cv_, NULL));
-}
-
-CondVar::~CondVar() { PthreadCall("destroy cv", pthread_cond_destroy(&cv_)); }
-
-void CondVar::Wait() {
-  PthreadCall("wait", pthread_cond_wait(&cv_, &mu_->mu_));
-}
-
-void CondVar::Signal() {
-  PthreadCall("signal", pthread_cond_signal(&cv_));
-}
-
-void CondVar::SignalAll() {
-  PthreadCall("broadcast", pthread_cond_broadcast(&cv_));
-}
-
-class MutexLock {		//scoped lock
- public:
-  explicit MutexLock(Mutex *mu)
-      : mu_(mu)  {
-    this->mu_->Lock();
-  }
-  ~MutexLock() { this->mu_->Unlock(); }
-
- private:
-  Mutex *const mu_;
-  // No copying allowed
-  MutexLock(const MutexLock&);
-  void operator=(const MutexLock&);
-};
-
-typedef void* (*ThreadFunc)(void* arg);
-
-pthread_t StartThread(ThreadFunc func, void* arg) {
-  pthread_t t;
-  PthreadCall("start thread",
-              pthread_create(&t, NULL, func, arg));
-  return t;
-}
-void ThreadJoin(pthread_t t)
-{
-  PthreadCall("join thread",
-              pthread_join(t, NULL));
-}
-
-static Mutex cache_m;
-static map<string, string> cache;
 int epfd = -1; 
+
 #define MAX_CLIENTS 100
 #define MAX_BUFLEN 10000
 #define MAX_CMD_PARTS 3
 
-enum State{CMD_CHECK, CMD_PARSE, GET_CMD, SET_CMD};
+enum State{CMD_CHECK, CMD_PARSE, GET_CMD, DEL_CMD, ADD_CMD, SET_CMD};
 struct client{
 	client():fd(-1),rpos(0),cmd_end(NULL),state(CMD_CHECK),wpos(0),wend(0){}
 	void reset_for_next_read(){
@@ -144,12 +77,6 @@ struct epoll_event events[MAX_CLIENTS];
 struct client clients[MAX_CLIENTS];
 int nclients;
 
-class Task{
-	public: 
-		virtual ~Task(){}
-		virtual void Process() = 0;
-};
-
 void deregister_event_helper(client* c, uint32_t event)
 {
 	struct epoll_event ev; 
@@ -158,11 +85,13 @@ void deregister_event_helper(client* c, uint32_t event)
 	epoll_ctl(epfd, EPOLL_CTL_DEL, c->fd, &ev);  
 }
 
-void register_event_helper(client* c, uint32_t event)
+void get_ready_to_write(client* c)
 {
+	c->wend = strlen(c->writebuf) + 1;		//ignore '\0' in the end of C style string
+	c->wpos = 0;
 	struct epoll_event ev; 
 	ev.data.fd=c->fd;  
-	ev.events=event;  
+	ev.events=EPOLLOUT;  
 	epoll_ctl(epfd, EPOLL_CTL_ADD, c->fd, &ev);  
 }
 
@@ -171,12 +100,52 @@ class GetTask : public Task{
 		GetTask(client* c):client_(c){}
 		virtual ~GetTask(){}
 		virtual void Process(){
-			MutexLock l(&cache_m);
-			sprintf(client_->writebuf, "get key: %s, value: %s\r\n", 
-					client_->cmd_part[1], cache[client_->cmd_part[1]].c_str());
-			client_->wend = strlen(client_->writebuf) + 1;		//ignore '\0' in the end of C style string
-			client_->wpos = 0;
-			register_event_helper(client_, EPOLLOUT);
+			string key = client_->cmd_part[1];
+			string val;
+			if(db.Get(key, &val))
+				sprintf(client_->writebuf, "VALUE %s %d\r\n%s\r\n", 
+						key.c_str(), (int)key.length(), val.c_str());
+			else
+				sprintf(client_->writebuf, "NOT_FOUND\r\n");
+
+			get_ready_to_write(client_);
+		}
+	private:
+	client* client_;
+};
+
+class DelTask : public Task{
+	public:
+		DelTask(client* c):client_(c){}
+		virtual ~DelTask(){}
+		virtual void Process(){
+			string key = client_->cmd_part[1];
+			string val;
+			if(db.Del(key))
+				sprintf(client_->writebuf, "DELETED\r\n"); 
+			else
+				sprintf(client_->writebuf, "NOT_FOUND\r\n"); 
+
+			get_ready_to_write(client_);
+		}
+	private:
+	client* client_;
+};
+
+class AddTask : public Task{
+	public:
+		AddTask(client* c):client_(c){}
+		virtual ~AddTask(){}
+		virtual void Process(){
+			client_->readbuf[client_->rpos-2] = '\0'; //replace '\r' with '\0', make the data as a C style string
+			string key = client_->cmd_part[1];
+			string val = client_->cmd_end+1;
+
+			if(db.Add(key, val))
+				sprintf(client_->writebuf, "STORED\r\n");
+			else
+				sprintf(client_->writebuf, "EXISTS\r\n");
+			get_ready_to_write(client_);
 		}
 	private:
 	client* client_;
@@ -188,85 +157,17 @@ class SetTask : public Task{
 		virtual ~SetTask(){}
 		virtual void Process(){
 			client_->readbuf[client_->rpos-2] = '\0'; //replace '\r' with '\0', make the data as a C style string
-			char* key = client_->cmd_part[1];
-			char* val = client_->cmd_end+1;
-			{
-				MutexLock l(&cache_m);
-				cache[key] = val;
-			}
+			string key = client_->cmd_part[1];
+			string val = client_->cmd_end+1;
 
-			sprintf(client_->writebuf, "set key: %s, value: %s\r\n", key, val);
-			client_->wend = strlen(client_->writebuf) + 1;
-			client_->wpos = 0;
-			register_event_helper(client_, EPOLLOUT);
+			if(db.Set(key, val))
+				sprintf(client_->writebuf, "STORED\r\n");
+			else
+				sprintf(client_->writebuf, "NOT_FOUND\r\n");
+			get_ready_to_write(client_);
 		}
 	private:
 	client* client_;
-};
-
-class ThreadPool{
-	public:
-		ThreadPool(int nthreads):nthreads_(nthreads), has_tasks_(&m_), stop_(false){
-			tids_ = new pthread_t[nthreads_];
-		}
-
-		~ThreadPool(){
-			delete[] tids_;
-		}
-
-		void AddTask(Task* tp){
-			MutexLock l(&m_);
-			task_queue_.push_back(tp);
-			if(task_queue_.size() == 1)	//maybe someone is waiting for tasks
-				has_tasks_.SignalAll();
-		}
-
-		void Run()
-		{
-			for(int i = 0; i<nthreads_; i++)
-				tids_[i] = StartThread(ThreadPool::thread_func, this);
-		}
-
-		void Stop()
-		{
-			{
-				MutexLock l(&m_);
-				stop_ = true;
-			}
-			has_tasks_.SignalAll();
-			for(int i = 0; i<nthreads_; i++)
-				ThreadJoin(tids_[i]);
-		}
-
-	private:
-		static void* thread_func(void* arg)
-		{
-			ThreadPool* tp = reinterpret_cast<ThreadPool*> (arg);
-			MutexLock l(&tp->m_);
-			while(!tp->stop_){
-				while(tp->task_queue_.empty()){
-					tp->has_tasks_.Wait();
-					if(tp->stop_){
-						goto end;
-					}
-				}
-				Task* taskp = tp->task_queue_.front();
-				tp->task_queue_.pop_front();
-				tp->m_.Unlock();
-				taskp->Process();
-				delete taskp;
-				tp->m_.Lock();
-			}
-end:
-			return (void*) 0;
-		}
-
-		int nthreads_;
-		pthread_t* tids_;
-		CondVar has_tasks_;
-		Mutex m_;
-		deque<Task*> task_queue_;
-		bool stop_;
 };
 
 ThreadPool thread_pool(5);
@@ -298,26 +199,40 @@ int handle_read_event(client* c)
 					}
 					if(strcmp(c->cmd_part[0], "get") == 0) //get command
 						c->state = GET_CMD;
+					else if(strcmp(c->cmd_part[0], "del") == 0)
+						c->state = DEL_CMD;
+					else if(strcmp(c->cmd_part[0], "add") == 0)
+						c->state = ADD_CMD;
 					else if(strcmp(c->cmd_part[0], "set") == 0)
 						c->state = SET_CMD;
 					else return -2;		//bad command
 					break;
 				}
 			case GET_CMD:
+			case DEL_CMD:
 				{
-					GetTask* p = new GetTask(c);
+					Task* p;
+					if(c->state == GET_CMD) 
+						p = new GetTask(c);
+					else
+						p = new DelTask(c);
 					deregister_event_helper(c, EPOLLIN);	//stop receiving data from client to protect member variables in this client
 					thread_pool.AddTask(p);
 					return 1;
 					break;
 				}
+			case ADD_CMD:
 			case SET_CMD:
 				{
 					int bytes = atoi(c->cmd_part[2]);	//bytes of data block, to do: what if byte is 0 ?
 					if(c->readbuf+c->rpos-(c->cmd_end+1) < bytes + 2) //data not received completelly, +2 for '\r\n'
 						return 0;
 
-					SetTask* p = new SetTask(c);
+					Task* p;
+					if(c->state == ADD_CMD) 
+						p = new AddTask(c);
+					else
+						p = new SetTask(c);
 					deregister_event_helper(c, EPOLLIN);
 					thread_pool.AddTask(p);
 					return 1;
@@ -334,6 +249,11 @@ int main()
 	struct epoll_event ev; 
 
 	int listenfd;
+
+	if(!db.Open("mydb")){
+		cerr<<"db open failed:"<<endl;
+		return 0;
+	}
 
 	signal(SIGPIPE, SIG_IGN);	//ignore sigpipe to prevent server shut down
 
@@ -423,8 +343,6 @@ int main()
 				char* wbuf = clients[fd].writebuf;
 				int wend = clients[fd].wend;
 				int n;
-				fprintf(stderr, "press enter to write to client\n");
-				getchar();
                 while (wend>clients[fd].wpos && 
 						(n = write(fd, wbuf+clients[fd].wpos, wend-clients[fd].wpos)) > 0)
 					clients[fd].wpos += n;
@@ -436,10 +354,9 @@ int main()
 				}
 
 				if(wend == clients[fd].wpos){ //write finished
-					//fprintf(stderr, "write to fd %d, content: %s", fd, wbuf);  
 					//no need to rest for next write cause read event handler will do it
 					//register as read event
-					clients[fd].reset_for_next_read();
+					clients[fd].reset_for_next_read();	//reset for read
 					ev.data.fd=fd;  
 					ev.events=EPOLLIN;  
 					epoll_ctl(epfd,EPOLL_CTL_MOD,fd,&ev);  
