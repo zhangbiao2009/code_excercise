@@ -150,13 +150,20 @@ class Task{
 		virtual void Process() = 0;
 };
 
+void deregister_event_helper(client* c, uint32_t event)
+{
+	struct epoll_event ev; 
+	ev.data.fd=c->fd;  
+	ev.events=event;  
+	epoll_ctl(epfd, EPOLL_CTL_DEL, c->fd, &ev);  
+}
+
 void register_event_helper(client* c, uint32_t event)
 {
 	struct epoll_event ev; 
-	c->reset_for_next_read();
 	ev.data.fd=c->fd;  
 	ev.events=event;  
-	epoll_ctl(epfd, EPOLL_CTL_MOD, c->fd, &ev);  
+	epoll_ctl(epfd, EPOLL_CTL_ADD, c->fd, &ev);  
 }
 
 class GetTask : public Task{
@@ -293,12 +300,13 @@ int handle_read_event(client* c)
 						c->state = GET_CMD;
 					else if(strcmp(c->cmd_part[0], "set") == 0)
 						c->state = SET_CMD;
-					else return -1;		//bad command
+					else return -2;		//bad command
 					break;
 				}
 			case GET_CMD:
 				{
 					GetTask* p = new GetTask(c);
+					deregister_event_helper(c, EPOLLIN);	//stop receiving data from client to protect member variables in this client
 					thread_pool.AddTask(p);
 					return 1;
 					break;
@@ -310,6 +318,7 @@ int handle_read_event(client* c)
 						return 0;
 
 					SetTask* p = new SetTask(c);
+					deregister_event_helper(c, EPOLLIN);
 					thread_pool.AddTask(p);
 					return 1;
 					break;
@@ -391,6 +400,7 @@ int main()
                     clients[fd].rpos += n;
 
 				if (n == 0) {  //client has been closed
+					fprintf(stderr, "client has been closed, so server also close it, fd=%d\n", fd);  
                     close(fd);  
 					nclients--;
 				}
@@ -401,7 +411,7 @@ int main()
 				}
 				int res = handle_read_event(&clients[fd]);
 				if(res<0){ //error happened
-					fprintf(stderr, "an error happened\n");  
+					fprintf(stderr, "bad command, res=%d\n", res);  
 					close(fd);  
 					nclients--;
 				}else if(res>0){	//the command has been hand over to a background thread, nothing to do here
@@ -413,6 +423,8 @@ int main()
 				char* wbuf = clients[fd].writebuf;
 				int wend = clients[fd].wend;
 				int n;
+				fprintf(stderr, "press enter to write to client\n");
+				getchar();
                 while (wend>clients[fd].wpos && 
 						(n = write(fd, wbuf+clients[fd].wpos, wend-clients[fd].wpos)) > 0)
 					clients[fd].wpos += n;
@@ -427,6 +439,7 @@ int main()
 					//fprintf(stderr, "write to fd %d, content: %s", fd, wbuf);  
 					//no need to rest for next write cause read event handler will do it
 					//register as read event
+					clients[fd].reset_for_next_read();
 					ev.data.fd=fd;  
 					ev.events=EPOLLIN;  
 					epoll_ctl(epfd,EPOLL_CTL_MOD,fd,&ev);  

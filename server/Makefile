@@ -4,4 +4,4 @@ server: server.cpp anet.cpp
 client: client.cpp anet.cpp
 	g++ -Wall -g $^ -o $@
 clean:
-	@rm -f server client
+	@rm -f server client core
