@@ -282,7 +282,6 @@ void HuffmanDecoder::DecodeAndOutput(int infd, FILE* outfp)
 		}
 		//arrive at a leaf node, output the charcter
 		fprintf(outfp, "%c", node_vec_[curr]->letter);
-		fprintf(stderr, "%c", node_vec_[curr]->letter);
 	}
 }
 
