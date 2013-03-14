@@ -217,9 +217,8 @@ int HuffmanEncoder::LettersEncodeAndOutput(FILE* infp, int outfd)
 
 off_t HuffmanEncoder::ReserveRoomInt(int fd)
 {
-	off_t offset = Lseek(fd, 0, SEEK_END);
-	int i = 0;
-	Write(fd, &i, sizeof(i));
+	off_t offset = Lseek(fd, 0, SEEK_CUR);
+	Lseek(fd, sizeof(int), SEEK_END);
 	return offset;
 }
 
