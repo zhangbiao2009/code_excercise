@@ -142,6 +142,7 @@ void* reader(void* arg)
 	//read data
 	if(arg){	//wait until continue command sending
 		int self = *(int*)arg;
+		MutexLock tmp(&cm[self]);
 		cv[self]->Wait();
 	}
 	if(arg) delete (int*)arg;
@@ -172,6 +173,7 @@ void* writer(void* arg)
 	//write
 	if(arg){
 		int self = *(int*)arg;
+		MutexLock tmp(&cm[self]);
 		cv[self]->Wait();
 	}
 	if(arg) delete (int*)arg;
@@ -216,6 +218,7 @@ int main()
 		scanf("%s", cmd);
 		if(string(cmd) == "cont"){	//cont <tid>, thread tid continue running
 			scanf("%d", &n);
+			MutexLock tmp(&cm[n]);
 			cv[n]->Signal();
 		}else if(string(cmd) == "start"){ //start <n> <reader|writer>
 			scanf("%d", &n);
