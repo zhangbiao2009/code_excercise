@@ -752,8 +752,10 @@ rpcs::add_reply(unsigned int clt_nonce, unsigned int xid,
             it->buf = b;
             it->sz = sz;
             it->cb_present = true;
+            break;
         }
     }
+    assert(it->cb_present == true);
 }
 
 void
