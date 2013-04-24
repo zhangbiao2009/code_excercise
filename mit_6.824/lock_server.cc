@@ -32,15 +32,15 @@ lock_server::acquire(int clt, lock_protocol::lockid_t lid, int &r)
 {
   lock_protocol::status ret = lock_protocol::OK;
   ScopedLock ml(&lock_clients_mutex);
-  printf("before acquire request from clt %d\n", clt);
-  locktable_dump();
+  //printf("before acquire request from clt %d\n", clt);
+  //locktable_dump();
   while(lock_clients.find(lid) != lock_clients.end())
       pthread_cond_wait(&lock_clients_cond, &lock_clients_mutex);
 
   lock_clients[lid] = clt;
   r = lid;
-  printf("after acquire request from clt %d\n", clt);
-  locktable_dump();
+  //printf("after acquire request from clt %d\n", clt);
+  //locktable_dump();
   return ret;
 }
 
@@ -49,8 +49,6 @@ lock_server::release(int clt, lock_protocol::lockid_t lid, int &r)
 {
   lock_protocol::status ret = lock_protocol::OK;
   ScopedLock ml(&lock_clients_mutex);
-  printf("before release request from clt %d\n", clt);
-  locktable_dump();
   std::map <int, int>::iterator it = lock_clients.find(lid);
   if(it != lock_clients.end() && it->second == clt) {
       lock_clients.erase(it);
@@ -58,8 +56,6 @@ lock_server::release(int clt, lock_protocol::lockid_t lid, int &r)
   }/* else {
       ret = lock_protocol::NOENT;
   }*/
-  printf("after release request from clt %d\n", clt);
-  locktable_dump();
   r = lid;
   return ret;
 }

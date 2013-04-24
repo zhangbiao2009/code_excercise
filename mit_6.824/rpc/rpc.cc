@@ -228,19 +228,19 @@ rpcc::call1(unsigned int proc, marshall &req, unmarshall &rep,
 		if(transmit){
 			get_refconn(&ch);
 			if(ch){
-			        if(reachable_) {
-                                        request forgot;
-                                        {
-                                                ScopedLock ml(&m_);
-                                                if (dup_req_.isvalid() && xid_rep_done_ > dup_req_.xid) {
-                                                        forgot = dup_req_;
-                                                        dup_req_.clear();
-                                                }
-                                        }
-                                        if (forgot.isvalid()) 
-                                                ch->send((char *)forgot.buf.c_str(), forgot.buf.size());
-                                        ch->send(req.cstr(), req.size());
-                                }
+				if(reachable_) {
+					request forgot;
+					{
+						ScopedLock ml(&m_);
+						if (dup_req_.isvalid() && xid_rep_done_ > dup_req_.xid) {
+							forgot = dup_req_;
+							dup_req_.clear();
+						}
+					}
+					if (forgot.isvalid()) 
+						ch->send((char *)forgot.buf.c_str(), forgot.buf.size());
+					ch->send(req.cstr(), req.size());
+				}
 				else jsl_log(JSL_DBG_1, "not reachable\n");
 				jsl_log(JSL_DBG_2, 
 						"rpcc::call1 %u just sent req proc %x xid %u clt_nonce %d\n", 
@@ -262,22 +262,22 @@ rpcc::call1(unsigned int proc, marshall &req, unmarshall &rep,
 		{
 			ScopedLock cal(&ca.m);
 			while (!ca.done){
-			        jsl_log(JSL_DBG_2, "rpcc:call1: wait\n");
+				jsl_log(JSL_DBG_2, "rpcc:call1: wait\n");
 				if(pthread_cond_timedwait(&ca.c, &ca.m,
-                                                 &nextdeadline) == ETIMEDOUT){
-				  	jsl_log(JSL_DBG_2, "rpcc::call1: timeout\n");
+							&nextdeadline) == ETIMEDOUT){
+					jsl_log(JSL_DBG_2, "rpcc::call1: timeout\n");
 					break;
 				}
 			}
 			if(ca.done){
-			        jsl_log(JSL_DBG_2, "rpcc::call1: reply received\n");
+				jsl_log(JSL_DBG_2, "rpcc::call1: reply received\n");
 				break;
 			}
 		}
 
 		if(retrans_ && (!ch || ch->isdead())){
 			// since connection is dead, retransmit
-                        // on the new connection 
+			// on the new connection 
 			transmit = true; 
 		}
 		curr_to.to <<= 1;
@@ -399,7 +399,7 @@ rpcc::update_xid_rep(unsigned int xid)
 	}
 	xid_rep_window_.push_back(xid);
 
-compress:
+compress:		//compress serial numbers, eg.: 2,3,4,5,7,8,9 after compressing will be 5,7,8,9
 	it = xid_rep_window_.begin();
 	for (it++; it != xid_rep_window_.end(); it++){
 		while (xid_rep_window_.front() + 1 == *it)
@@ -577,17 +577,16 @@ rpcs::dispatch(djob_t *j)
 
 		stat = checkduplicate_and_update(h.clt_nonce, h.xid,
                                                  h.xid_rep, &b1, &sz1);
+		/*
         jsl_log(JSL_DBG_2,
                 "rpcs::dispatch: rpc %u (proc %x, last_rep %u) from clt %u for srv instance %u, returned stat %d \n",
                 h.xid, proc, h.xid_rep, h.clt_nonce, h.srv_nonce, stat);
+				*/
 	} else {
 		// this client does not require at most once logic
 		stat = NEW;
 	}
 
-    jsl_log(JSL_DBG_2,
-            "rpcs::dispatch: rpc %u (proc %x, last_rep %u) from clt %u for srv instance %u, handled stat %d \n",
-            h.xid, proc, h.xid_rep, h.clt_nonce, h.srv_nonce, stat);
 	switch (stat){
 		case NEW: // new request
 			if(counting_){
@@ -666,9 +665,9 @@ rpcs::rpcstate_t
 rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigned int xid,
 		unsigned int xid_rep, char **b, int *sz)
 {
-    ScopedLock rwl(&reply_window_m_);   //reply_window_m_ also protects previous_xid_rep_
+    ScopedLock rwl(&reply_window_m_);	//reply_window_m_ also protects max_xid_rep_sofar_
     /* 
-     * if clt_nonce exists, but xid is smaller than anyone in the list 
+     * if clt_nonce exists, but xid is smaller than max_xid_rep_sofar_[clt_nonce];
      *     return FORGOTTEN;
      * if (clt_nonce, xid) first meet
      *     record clt_nonce and xid & return new;
@@ -686,23 +685,14 @@ rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigned int xid,
     std::map<unsigned int, std::list<reply_t> >::iterator clt = 
         reply_window_.find(clt_nonce);
 
-    /*
-    if(clt == reply_window_.end()){ //new client
-        std::list<reply_t> reply_list;
-        reply_t reply(xid);
-        reply_list.push_back(reply);
-        reply_window_[clt_nonce] = reply_list;
-        return NEW;
-    }*/
+	assert(clt != reply_window_.end());
+    assert(xid > xid_rep);
+	
+	if(xid_rep > max_xid_rep_sofar_[clt_nonce])	//max_xid_rep_sofar_[clt_nonce] will be 0 at first
+		max_xid_rep_sofar_[clt_nonce] = xid_rep;
 
-    // an existing client
-
-    assert(xid >= 1);
-    if(xid <= previous_xid_rep_[clt_nonce])
+    if(xid <= max_xid_rep_sofar_[clt_nonce])
         return FORGOTTEN;
-
-    // invariant: xid_rep is >= previous xid_rep
-    previous_xid_rep_[clt_nonce] = xid_rep;
 
     //delete replys which client have already received.
     std::list<reply_t>::iterator it = clt->second.begin();
@@ -710,8 +700,9 @@ rpcs::checkduplicate_and_update(unsigned int clt_nonce, unsigned int xid,
         if(it->xid <= xid_rep){ // an entry to delete
             free(it->buf);
             it = clt->second.erase(it);
-        }else
+        }else{
             ++it;
+		}
     }
 
     for(it = clt->second.begin(); it != clt->second.end(); it++){

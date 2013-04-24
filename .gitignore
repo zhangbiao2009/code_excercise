@@ -20,6 +20,8 @@ local.properties
 *.idx
 *.txt
 *.out
+core
+tags
 
 # External tool builders
 .externalToolBuilders/

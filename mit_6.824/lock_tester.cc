@@ -76,7 +76,7 @@ test1(void)
 }
 
 void *
-test2(void *x)
+test2(void *x) 
 {
   int i = * (int *) x;
 
@@ -104,7 +104,6 @@ test3(void *x)
     printf ("test3: client %d got lock\n", i);
     check_release(a);
     lc[i]->release(a);
-    printf ("test3: client %d release done\n", i);
   }
   return 0;
 }
@@ -121,7 +120,6 @@ test4(void *x)
     printf ("test4: thread %d on client 0 got lock\n", i);
     check_release(a);
     lc[0]->release(a);
-    printf ("test4: client 0 release done\n");
   }
   return 0;
 }
@@ -131,22 +129,15 @@ test5(void *x)
 {
   int i = * (int *) x;
 
-  printf ("test5: thread %d acquire a release a concurrent; same and diff clnt\n", i);
+  printf ("test5: client %d acquire a release a concurrent; same and diff clnt\n", i);
   for (int j = 0; j < 10; j++) {
-    if(i<5) printf ("test5: thread %d on client 0 request acquring lock\n", i);
-    else printf ("test5: thread %d on client 1 request acquring lock\n", i);
     if (i < 5)  lc[0]->acquire(a);
     else  lc[1]->acquire(a);
     check_grant(a);
-    if(i<5) printf ("test5: thread %d on client 0 got lock\n", i);
-    else printf ("test5: thread %d on client 1 got lock\n", i);
+    printf ("test5: client %d got lock\n", i);
     check_release(a);
-    if(i<5) printf ("test5: thread %d on client 0 request releasing lock\n", i);
-    else printf ("test5: thread %d on client 1 request releasing lock\n", i);
     if (i < 5) lc[0]->release(a);
     else lc[1]->release(a);
-    if(i<5) printf ("test5: thread %d on client 0 release done\n", i);
-    else printf ("test5: thread %d on client 1 release done\n", i);
   }
   return 0;
 }
@@ -162,7 +153,7 @@ main(int argc, char *argv[])
     setvbuf(stderr, NULL, _IONBF, 0);
     srandom(getpid());
 
-    jsl_set_debug(4);
+    //jsl_set_debug(2);
 
     if(argc < 2) {
       fprintf(stderr, "Usage: %s [host:]port [test]\n", argv[0]);
