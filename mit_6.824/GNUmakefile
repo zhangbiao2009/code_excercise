@@ -1,4 +1,4 @@
-LAB=1
+LAB=2
 SOL=0
 RPC=./rpc
 LAB2GE=$(shell expr $(LAB) \>\= 2)
@@ -32,7 +32,7 @@ LDLIBS += $(shell test -f `gcc -print-file-name=libdl.so` && echo -ldl)
 CC = g++
 CXX = g++
 
-all:  lab$(LAB)
+lab:  lab$(LAB)
 lab1: rpc/rpctest lock_server lock_tester lock_demo
 lab2: rpc/rpctest lock_server lock_tester lock_demo yfs_client extent_server
 lab3: yfs_client extent_server lock_server test-lab-3-b test-lab-3-c
