@@ -216,11 +216,40 @@ fuseserver_createhelper(fuse_ino_t parent, const char *name,
                         mode_t mode, struct fuse_entry_param *e)
 {
   // In yfs, timeouts are always set to 0.0, and generations are always set to 0
+  yfs_client::status ret;
   e->attr_timeout = 0.0;
   e->entry_timeout = 0.0;
   e->generation = 0;
-  // You fill this in for Lab 2
-  return yfs_client::NOENT;
+
+  assert(yfs->isdir(parent));
+  //check existence
+  std::vector<yfs_client::dirent> dirents;
+  ret = yfs->readdir(parent, dirents);
+  if(ret != yfs_client::OK)
+	  return ret;
+
+  for(int i=0; i<dirents.size(); i++)
+	  if(std::string(name) == dirents[i].name)
+		  return yfs_client::EXIST;
+
+  //call yfs_client to create a file
+  yfs_client::inum ino = yfs->new_file_inum();
+  ret = yfs->create(ino);
+  if(ret != yfs_client::OK)
+	  return ret;
+
+  //add <name, ino> into @parent
+  yfs_client::dirent d;
+  d.name = name;
+  d.inum = ino;
+  dirents.push_back(d);
+  ret = yfs->writedir(parent, dirents);
+  if(ret != yfs_client::OK)
+	  return ret;
+
+  e->ino = ino;
+  ret = getattr(ino, e->attr);
+  return ret;
 }
 
 void
@@ -270,7 +299,18 @@ fuseserver_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
   e.generation = 0;
   bool found = false;
 
-  // You fill this in for Lab 2
+  std::vector<yfs_client::dirent> dirents;
+  yfs_client::status ret = yfs->readdir(parent, dirents);
+  if(ret != yfs_client::OK)
+	  fuse_reply_err(req, ENOENT);
+
+  for(int i=0; i<dirents.size(); i++)
+	  if(std::string(name) == dirents[i].name){
+		  found = true;
+		  e.ino = dirents[i].inum;
+		  getattr(e.ino, e.attr);
+	  }
+
   if (found)
     fuse_reply_entry(req, &e);
   else
@@ -320,6 +360,8 @@ fuseserver_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 {
   yfs_client::inum inum = ino; // req->in.h.nodeid;
   struct dirbuf b;
+  yfs_client::status ret;
+  std::string buf;
 
   printf("fuseserver_readdir\n");
 
@@ -330,9 +372,14 @@ fuseserver_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
 
   memset(&b, 0, sizeof(b));
 
+  std::vector<yfs_client::dirent> dirents;
+  ret = yfs->readdir(inum, dirents);
+  if(ret != yfs_client::OK)
+      fuse_reply_err(req, ENOENT);
 
-  // You fill this in for Lab 2
-
+  for(int i=0; i<dirents.size(); i++){
+	  dirbuf_add(&b, dirents[i].name.c_str(), dirents[i].inum);
+  }
 
   reply_buf_limited(req, b.p, b.size, off, size);
   free(b.p);

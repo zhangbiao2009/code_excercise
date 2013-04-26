@@ -21,6 +21,8 @@ local.properties
 *.txt
 *.out
 *.log
+*.d
+*.o
 core
 tags
 

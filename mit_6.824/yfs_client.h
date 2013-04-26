@@ -5,6 +5,7 @@
 //#include "yfs_protocol.h"
 #include "extent_client.h"
 #include <vector>
+#include <set>
 
 
 class yfs_client {
@@ -34,6 +35,9 @@ class yfs_client {
  private:
   static std::string filename(inum);
   static inum n2i(std::string);
+  static std::string i2n(inum);
+  inum new_uniq_number();
+  std::set<inum> used_nums_;
  public:
 
   yfs_client(std::string, std::string);
@@ -43,6 +47,11 @@ class yfs_client {
 
   int getfile(inum, fileinfo &);
   int getdir(inum, dirinfo &);
+  int create(inum);
+  int readdir(inum, std::vector<dirent>&);
+  int writedir(inum inum, const std::vector<dirent>& dirents);
+  inum new_file_inum();
+  inum new_dir_inum();
 };
 
 #endif 
