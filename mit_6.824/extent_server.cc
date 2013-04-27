@@ -23,6 +23,7 @@ int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &)
 {
 	ScopedLock l(&m_);
 	extents_[id] = buf;
+	attrs_[id].size = buf.length();
 	return extent_protocol::OK;
 }
 
@@ -32,20 +33,27 @@ int extent_server::get(extent_protocol::extentid_t id, std::string &buf)
 	std::map<extent_protocol::extentid_t, std::string>::iterator it;
 	if((it=extents_.find(id)) == extents_.end())
 		return extent_protocol::NOENT;
-	buf = it->second;
+	buf = it->second.substr(0, attrs_[id].size);
 	return extent_protocol::OK;
 }
 
 int extent_server::getattr(extent_protocol::extentid_t id, extent_protocol::attr &a)
 {
-	// You fill this in for Lab 2.
-	// You replace this with a real implementation. We send a phony response
-	// for now because it's difficult to get FUSE to do anything (including
-	// unmount) if getattr fails.
-	a.size = 0;
+	ScopedLock l(&m_);
+	a.size = attrs_[id].size;
 	a.atime = 0;
 	a.mtime = 0;
 	a.ctime = 0;
+	return extent_protocol::OK;
+}
+
+int extent_server::setattr(extent_protocol::extentid_t id, extent_protocol::attr a, int &)
+{
+	ScopedLock l(&m_);
+	if(a.size > attrs_[id].size){	//bigger than orignial size, need to pad null bytes
+		extents_[id].append(a.size - attrs_[id].size, '\0');
+	}
+	attrs_[id].size = a.size;	//only handle size attr
 	return extent_protocol::OK;
 }
 

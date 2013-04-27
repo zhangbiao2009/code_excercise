@@ -81,6 +81,23 @@ yfs_client::getfile(inum inum, fileinfo &fin)
 }
 
 int
+yfs_client::setattr(inum inum, struct stat st)
+{
+  int r = OK;
+  extent_protocol::attr a;
+  a.size = st.st_size;
+  a.atime = st.st_atime;
+  a.mtime = st.st_mtime;
+  a.ctime = st.st_ctime;
+  
+  if (ec->setattr(inum, a) != extent_protocol::OK){
+    r = IOERR;
+  }
+  return r;
+}
+
+
+int
 yfs_client::getdir(inum inum, dirinfo &din)
 {
   int r = OK;
@@ -175,4 +192,43 @@ yfs_client::writedir(inum inum, const std::vector<dirent>& dirents)
 	}
 
 	return r;
+}
+
+int
+yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)	//maybe this op will be more proper when implemented at extent server side
+{
+	std::string tmpbuf;
+	if(ec->get(inum, tmpbuf)!= extent_protocol::OK){
+		return IOERR;
+	}
+	buf = tmpbuf.substr(off, size);
+	return OK;
+}
+
+int
+yfs_client::write(inum inum, const char* buf, size_t size, off_t off)	//maybe this op will be more proper when implemented at extent server side
+{
+	std::string tmpbuf; //orignal content
+
+	printf("called write on: %016llx\n", inum);
+	if(ec->get(inum, tmpbuf)!= extent_protocol::OK){
+		return IOERR;
+	}
+	if(off <= tmpbuf.length())
+		tmpbuf.replace(off, size, buf, size);
+	else{
+		tmpbuf.append(off-tmpbuf.length(), '\0');	//append null bytes
+		tmpbuf.append(buf, size);
+	}
+
+	if(ec->put(inum, tmpbuf)!= extent_protocol::OK){
+		return IOERR;
+	}
+
+	extent_protocol::attr a;
+	a.size = tmpbuf.length();
+	if (ec->setattr(inum, a) != extent_protocol::OK){
+		return IOERR;
+	}
+	return OK;
 }
