@@ -16,7 +16,7 @@
 yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
 {
   ec = new extent_client(extent_dst);
-
+  lc = new lock_client(lock_dst);
 }
 
 yfs_client::inum
@@ -79,7 +79,6 @@ yfs_client::getfile(inum inum, fileinfo &fin)
   printf("getfile %016llx -> sz %llu\n", inum, fin.size);
 
  release:
-
   return r;
 }
 
@@ -127,6 +126,7 @@ yfs_client::inum
 yfs_client::new_uniq_number()
 {
 	yfs_client::inum remain;
+	srand(getpid());
 	do {
 		remain = rand()%FILE_BASE;
 	}while(remain<=1 || used_nums_.find(remain) != used_nums_.end()); //only use remain greater than 1
@@ -146,89 +146,109 @@ int
 yfs_client::create(inum parent, const char *name, inum& ino)
 {
 	int r = OK;
-
+	lc->acquire(parent);
 	//check existence
 	std::vector<dirent> dirents;
+	dirent d;
 	r = readdir(parent, dirents);
 	if(r != OK)
-		return r;;
+		goto release;
 
 	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++)
 		if(std::string(name) == dirents[i].name){
 			r = EXIST;
-			return r;
+			goto release;
 		}
 
 	//create a file
 	ino = new_file_inum();
 	if(ec->put(ino, "") != extent_protocol::OK){
 		r = IOERR;
-		return r;
+		goto release;
 	}
 	//add <name, ino> into @parent
-	dirent d;
 	d.name = name;
 	d.inum = ino;
 	dirents.push_back(d);
 	r = writedir(parent, dirents);
+release:
+	lc->release(parent);
 	return r;
 }
 
 int
 yfs_client::unlink(inum parent, const char *name)
 {
+	int r = OK;
+	lc->acquire(parent);
 	//check existence
 	std::vector<yfs_client::dirent> dirents;
-	if(readdir(parent, dirents) != OK)
-		return NOENT;
-
-	std::vector<dirent>::size_type i=0;
-	for(; i<dirents.size(); i++)
+	if(readdir(parent, dirents) != OK){
+		r = NOENT;
+		goto release;
+	}
+	std::vector<dirent>::size_type i;
+	for(i=0; i<dirents.size(); i++)
 		if(std::string(name) == dirents[i].name)
 			break;
 
-	if(i == dirents.size() || isdir(dirents[i].inum)) //not found or is a directory
-		return NOENT;
+	if(i == dirents.size() || isdir(dirents[i].inum)){ //not found or is a directory
+		r = NOENT;
+		goto release;
+	}
 
-	if(ec->remove(dirents[i].inum) != extent_protocol::OK)
-		return IOERR;
+	if(ec->remove(dirents[i].inum) != extent_protocol::OK){
+		r = IOERR;
+		goto release;
+	}
 
 	//remove <name, ino> in @parent
 	dirents.erase(dirents.begin()+i);
 
 	if(writedir(parent, dirents)!= OK)
-		return IOERR;
-
-	return OK;
+		r = IOERR;
+release:
+	lc->release(parent);
+	return r;
 }
 
 int
 yfs_client::mkdir(inum parent, const char *name, inum& ino)
 {
+	int r = OK;
+	lc->acquire(parent);
 	//check existence
 	std::vector<yfs_client::dirent> dirents;
-	if(readdir(parent, dirents) != OK)
-		return NOENT;
+	dirent d;
+	if(readdir(parent, dirents) != OK){
+		r = NOENT;
+		goto release;
+	}
 
 	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++)
-		if(std::string(name) == dirents[i].name)
-			return EXIST;
+		if(std::string(name) == dirents[i].name){
+			r = EXIST;
+			goto release;
+		}
 
 	//call yfs_client to create a directory 
 	ino = new_dir_inum();
 
-	if(ec->put(ino, "") != extent_protocol::OK)
-		return IOERR;
+	if(ec->put(ino, "") != extent_protocol::OK){
+		r = IOERR;
+		goto release;
+	}
 
 	//add <name, ino> into @parent
-	dirent d;
 	d.name = name;
 	d.inum = ino;
 	dirents.push_back(d);
 	if(writedir(parent, dirents)!= OK)
-		return IOERR;
+		r = IOERR;
 
-	return OK;
+release:
+	lc->release(parent);
+	return r;
 }
 
 int 
@@ -289,11 +309,14 @@ yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)
 int
 yfs_client::write(inum inum, const char* buf, size_t size, off_t off)
 {
+	int r = OK;
+	lc->acquire(inum);
 	std::string tmpbuf; //orignal content
 
 	printf("called write on: %016llx\n", inum);
 	if(ec->get(inum, tmpbuf)!= extent_protocol::OK){
-		return IOERR;
+		r = IOERR;
+		goto release;
 	}
 	if(off <= tmpbuf.length())
 		tmpbuf.replace(off, size, buf, size);
@@ -303,14 +326,17 @@ yfs_client::write(inum inum, const char* buf, size_t size, off_t off)
 	}
 
 	if(ec->put(inum, tmpbuf)!= extent_protocol::OK){
-		return IOERR;
+		r = IOERR;
+		goto release;
 	}
 
 	extent_protocol::attr a;
 	a.size = tmpbuf.length();
 	if (ec->setattr(inum, a) != extent_protocol::OK){
-		return IOERR;
+		r = IOERR;
 	}
-	return OK;
+release:
+	lc->release(inum);
+	return r;
 }
 
