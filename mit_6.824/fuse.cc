@@ -185,8 +185,6 @@ fuseserver_write(fuse_req_t req, fuse_ino_t ino,
                  const char *buf, size_t size, off_t off,
                  struct fuse_file_info *fi)
 {
-  // You fill this in for Lab 2
-  // Change the above line to "#if 1", and your code goes here
   yfs_client::status ret = yfs->write(ino, buf, size, off);
   if(ret != yfs_client::OK){
 	  fuse_reply_err(req, ENOENT);
@@ -218,34 +216,12 @@ fuseserver_createhelper(fuse_ino_t parent, const char *name,
                         mode_t mode, struct fuse_entry_param *e)
 {
   // In yfs, timeouts are always set to 0.0, and generations are always set to 0
-  yfs_client::status ret;
   e->attr_timeout = 0.0;
   e->entry_timeout = 0.0;
   e->generation = 0;
 
-  assert(yfs->isdir(parent));
-  //check existence
-  std::vector<yfs_client::dirent> dirents;
-  ret = yfs->readdir(parent, dirents);
-  if(ret != yfs_client::OK)
-	  return ret;
-
-  for(int i=0; i<dirents.size(); i++)
-	  if(std::string(name) == dirents[i].name)
-		  return yfs_client::EXIST;
-
-  //call yfs_client to create a file
-  yfs_client::inum ino = yfs->new_file_inum();
-  ret = yfs->create(ino);
-  if(ret != yfs_client::OK)
-	  return ret;
-
-  //add <name, ino> into @parent
-  yfs_client::dirent d;
-  d.name = name;
-  d.inum = ino;
-  dirents.push_back(d);
-  ret = yfs->writedir(parent, dirents);
+  yfs_client::inum ino;
+  yfs_client::status ret = yfs->create(parent, name, ino);
   if(ret != yfs_client::OK)
 	  return ret;
 
@@ -416,15 +392,21 @@ fuseserver_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name,
   e.attr_timeout = 0.0;
   e.entry_timeout = 0.0;
   e.generation = 0;
-  // Suppress compiler warning of unused e.
-  (void) e;
 
-  // You fill this in for Lab 3
-#if 0
+  yfs_client::inum ino;
+  yfs_client::status ret = yfs->mkdir(parent, name, ino);
+  if (ret == yfs_client::EXIST) {
+	  fuse_reply_err(req, EEXIST);
+	  return;
+  }else if(ret != yfs_client::OK){
+	  fuse_reply_err(req, ENOENT);
+	  return;
+  }
+
+  e.ino = ino;
+  getattr(ino, e.attr);
+
   fuse_reply_entry(req, &e);
-#else
-  fuse_reply_err(req, ENOSYS);
-#endif
 }
 
 //
@@ -437,11 +419,12 @@ fuseserver_mkdir(fuse_req_t req, fuse_ino_t parent, const char *name,
 void
 fuseserver_unlink(fuse_req_t req, fuse_ino_t parent, const char *name)
 {
-
-  // You fill this in for Lab 3
-  // Success:	fuse_reply_err(req, 0);
-  // Not found:	fuse_reply_err(req, ENOENT);
-  fuse_reply_err(req, ENOSYS);
+	yfs_client::status ret = yfs->unlink(parent, name);
+	if(ret != yfs_client::OK){
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+	fuse_reply_err(req, 0);
 }
 
 void

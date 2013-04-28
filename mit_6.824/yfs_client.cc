@@ -143,16 +143,92 @@ yfs_client::new_dir_inum()
 { return new_uniq_number(); }
 
 int
-yfs_client::create(inum inum)
+yfs_client::create(inum parent, const char *name, inum& ino)
 {
 	int r = OK;
-	if(ec->put(inum, "") != extent_protocol::OK){
-		r = IOERR;
-		goto release;
-	}
 
-release:
+	//check existence
+	std::vector<dirent> dirents;
+	r = readdir(parent, dirents);
+	if(r != OK)
+		return r;;
+
+	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++)
+		if(std::string(name) == dirents[i].name){
+			r = EXIST;
+			return r;
+		}
+
+	//create a file
+	ino = new_file_inum();
+	if(ec->put(ino, "") != extent_protocol::OK){
+		r = IOERR;
+		return r;
+	}
+	//add <name, ino> into @parent
+	dirent d;
+	d.name = name;
+	d.inum = ino;
+	dirents.push_back(d);
+	r = writedir(parent, dirents);
 	return r;
+}
+
+int
+yfs_client::unlink(inum parent, const char *name)
+{
+	//check existence
+	std::vector<yfs_client::dirent> dirents;
+	if(readdir(parent, dirents) != OK)
+		return NOENT;
+
+	std::vector<dirent>::size_type i=0;
+	for(; i<dirents.size(); i++)
+		if(std::string(name) == dirents[i].name)
+			break;
+
+	if(i == dirents.size() || isdir(dirents[i].inum)) //not found or is a directory
+		return NOENT;
+
+	if(ec->remove(dirents[i].inum) != extent_protocol::OK)
+		return IOERR;
+
+	//remove <name, ino> in @parent
+	dirents.erase(dirents.begin()+i);
+
+	if(writedir(parent, dirents)!= OK)
+		return IOERR;
+
+	return OK;
+}
+
+int
+yfs_client::mkdir(inum parent, const char *name, inum& ino)
+{
+	//check existence
+	std::vector<yfs_client::dirent> dirents;
+	if(readdir(parent, dirents) != OK)
+		return NOENT;
+
+	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++)
+		if(std::string(name) == dirents[i].name)
+			return EXIST;
+
+	//call yfs_client to create a directory 
+	ino = new_dir_inum();
+
+	if(ec->put(ino, "") != extent_protocol::OK)
+		return IOERR;
+
+	//add <name, ino> into @parent
+	dirent d;
+	d.name = name;
+	d.inum = ino;
+	dirents.push_back(d);
+	if(writedir(parent, dirents)!= OK)
+		return IOERR;
+
+	return OK;
 }
 
 int 
@@ -185,7 +261,7 @@ yfs_client::writedir(inum inum, const std::vector<dirent>& dirents)
 	int r = OK;
 	std::string buf;
 
-	for(int i=0; i<dirents.size(); i++){
+	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++){
 		std::string estr = dirents[i].name + ":" + i2n(dirents[i].inum);
 		if(i+1<dirents.size()) //not the last entry
 			estr.append(";");
@@ -200,7 +276,7 @@ yfs_client::writedir(inum inum, const std::vector<dirent>& dirents)
 }
 
 int
-yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)	//maybe this op will be more proper when implemented at extent server side
+yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)
 {
 	std::string tmpbuf;
 	if(ec->get(inum, tmpbuf)!= extent_protocol::OK){
@@ -211,7 +287,7 @@ yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)	//maybe th
 }
 
 int
-yfs_client::write(inum inum, const char* buf, size_t size, off_t off)	//maybe this op will be more proper when implemented at extent server side
+yfs_client::write(inum inum, const char* buf, size_t size, off_t off)
 {
 	std::string tmpbuf; //orignal content
 
@@ -237,3 +313,4 @@ yfs_client::write(inum inum, const char* buf, size_t size, off_t off)	//maybe th
 	}
 	return OK;
 }
+

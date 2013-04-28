@@ -24,6 +24,7 @@ int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &)
 	ScopedLock l(&m_);
 	extents_[id] = buf;
 	attrs_[id].size = buf.length();
+	attrs_[id].ctime = attrs_[id].mtime = time(NULL);
 	return extent_protocol::OK;
 }
 
@@ -34,16 +35,14 @@ int extent_server::get(extent_protocol::extentid_t id, std::string &buf)
 	if((it=extents_.find(id)) == extents_.end())
 		return extent_protocol::NOENT;
 	buf = it->second.substr(0, attrs_[id].size);
+	attrs_[id].atime = time(NULL);
 	return extent_protocol::OK;
 }
 
 int extent_server::getattr(extent_protocol::extentid_t id, extent_protocol::attr &a)
 {
 	ScopedLock l(&m_);
-	a.size = attrs_[id].size;
-	a.atime = 0;
-	a.mtime = 0;
-	a.ctime = 0;
+	a = attrs_[id];
 	return extent_protocol::OK;
 }
 
@@ -54,6 +53,7 @@ int extent_server::setattr(extent_protocol::extentid_t id, extent_protocol::attr
 		extents_[id].append(a.size - attrs_[id].size, '\0');
 	}
 	attrs_[id].size = a.size;	//only handle size attr
+	attrs_[id].ctime = attrs_[id].mtime = time(NULL);
 	return extent_protocol::OK;
 }
 
