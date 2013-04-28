@@ -2,7 +2,7 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "lock_server.h"
+#include "lock_server_cache.h"
 
 #include "jsl_log.h"
 
@@ -28,7 +28,7 @@ main(int argc, char *argv[])
     count = atoi(count_env);
   }
 
-  jsl_set_debug(4);
+  //jsl_set_debug(2);
 
 #ifndef RSM
   lock_server ls;

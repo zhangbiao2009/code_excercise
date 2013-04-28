@@ -328,6 +328,7 @@ class rpcs : public chanmgr {
 	pthread_mutex_t reply_window_m_; // protect reply window et al
 	pthread_mutex_t conss_m_; // protect conns_
 
+
 	protected:
 
 	struct djob_t {
@@ -347,7 +348,7 @@ class rpcs : public chanmgr {
 	public:
 	rpcs(unsigned int port, int counts=0);
 	~rpcs();
-
+        inline int port() { return listener_->port(); }
 	//RPC handler for clients binding
 	int rpcbind(int a, int &r);
 

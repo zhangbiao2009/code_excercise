@@ -326,7 +326,11 @@ tcpsconn::tcpsconn(chanmgr *m1, int port, int lossytest)
 		VERIFY(0);
 	}
 
-	jsl_log(JSL_DBG_2, "tcpsconn::tcpsconn listen on %d %d\n", port, 
+        socklen_t addrlen = sizeof(sin);
+        VERIFY(getsockname(tcp_, (sockaddr *)&sin, &addrlen) == 0);
+        port_ = ntohs(sin.sin_port);
+
+	jsl_log(JSL_DBG_2, "tcpsconn::tcpsconn listen on %d %d\n", port_, 
 		sin.sin_port);
 
 	if (pipe(pipe_) < 0) {
@@ -431,8 +435,8 @@ connect_to_dst(const sockaddr_in &dst, chanmgr *mgr, int lossy)
 	int yes = 1;
 	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
 	if(connect(s, (sockaddr*)&dst, sizeof(dst)) < 0) {
-		jsl_log(JSL_DBG_1, "rpcc::connect_to_dst failed to %s:%d, errno=%d\n", 
-				inet_ntoa(dst.sin_addr), (int)ntohs(dst.sin_port), errno);
+		jsl_log(JSL_DBG_1, "rpcc::connect_to_dst failed to %s:%d\n", 
+				inet_ntoa(dst.sin_addr), (int)ntohs(dst.sin_port));
 		close(s);
 		return NULL;
 	}
