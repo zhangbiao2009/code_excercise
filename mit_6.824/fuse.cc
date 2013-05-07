@@ -284,7 +284,7 @@ fuseserver_lookup(fuse_req_t req, fuse_ino_t parent, const char *name)
 	  return;
   }
 
-  for(int i=0; i<dirents.size(); i++)
+  for(std::vector<yfs_client::dirent>::size_type i=0; i<dirents.size(); i++)
 	  if(std::string(name) == dirents[i].name){
 		  found = true;
 		  e.ino = dirents[i].inum;
@@ -357,7 +357,7 @@ fuseserver_readdir(fuse_req_t req, fuse_ino_t ino, size_t size,
   if(ret != yfs_client::OK)
       fuse_reply_err(req, ENOENT);
 
-  for(int i=0; i<dirents.size(); i++){
+  for(std::vector<yfs_client::dirent>::size_type i=0; i<dirents.size(); i++){
 	  dirbuf_add(&b, dirents[i].name.c_str(), dirents[i].inum);
   }
 

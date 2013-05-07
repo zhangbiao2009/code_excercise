@@ -5,6 +5,14 @@
 
 #include "rpc.h"
 
+/*
+   when client a get a RETRY response, it knows that the lock is holding by client b,
+   and another client c is acquiring it, so the lock is currently unavailable.
+
+   when client a get a retry response, it means that the lock has been returned to server,
+   and server is going to give the lock to client b, and there's no other client acquring the lock.
+   so if client a wants the lock, it should acquire the lock immediately.
+ */
 class lock_protocol {
  public:
   enum xxstatus { OK, RETRY, RPCERR, NOENT, IOERR };
