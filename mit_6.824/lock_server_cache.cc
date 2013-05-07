@@ -30,7 +30,6 @@ int lock_server_cache::acquire(lock_protocol::lockid_t lid, std::string id,
 */
   lock_protocol::status ret = lock_protocol::OK;
   ScopedLock ml(&lock_clients_mutex);
-  tprintf("calling acquire for lock %llu from client %s\n", lid, id.c_str());
   if(lock_clients.find(lid) != lock_clients.end() && !(lock_clients[lid].available && lock_clients[lid].waited_clients.empty())){
 	  //no one is waiting for the lock and I'm in waited client set or the first one waiting for the lock
 	  std::set<std::string>* waited_clts = &lock_clients[lid].waited_clients;
@@ -42,22 +41,18 @@ int lock_server_cache::acquire(lock_protocol::lockid_t lid, std::string id,
 			  waited_clts->insert(id);
 		  //revoke lid from its owner, revoke should return quickly. 
 		  pthread_mutex_unlock(&lock_clients_mutex);
-		  tprintf("send revoke for lock %llu to client %s\n", lid, lock_clients[lid].cid.c_str());
 		  if(call_client_rpc(rlock_protocol::revoke, lid, lock_clients[lid].cid) != rlock_protocol::OK){
 			  //what to do it revoke failed?	unrecoverable error!
 			  abort();
 		  }
-		  tprintf("revoke for lock %llu to client %s returned\n", lid, lock_clients[lid].cid.c_str());
 		  pthread_mutex_lock(&lock_clients_mutex);
 		  while(!lock_clients[lid].available)
 			  pthread_cond_wait(&lock_clients[lid].cond, &lock_clients_mutex);		//wait the lock holder release the lock
 		  //todo: what happens if the lock holder client crashes before releasing the lock?
-		  tprintf("acquire lock %llu from client %s wake up because lock holder released the lock\n", lid, id.c_str());
 		  lock_clients[lid].waiting = false;
 	  }else{	//some one has already been waiting for the lock or I'm a new comer (not in waited clients set)
 		  //add the clt to waited clients set
 		  waited_clts->insert(id);
-		  tprintf("return RETRY for lock %llu from client %s\n", lid, id.c_str());
 		  return lock_protocol::RETRY;
 	  }
   }
@@ -75,12 +70,10 @@ int lock_server_cache::acquire(lock_protocol::lockid_t lid, std::string id,
   if(!lock_clients[lid].waited_clients.empty()){
 	  std::string cid = *lock_clients[lid].waited_clients.begin();
 	  pthread_mutex_unlock(&lock_clients_mutex);
-	  tprintf("send retry for lock %llu to client %s\n", lid, cid.c_str());
 	  if(call_client_rpc(rlock_protocol::retry, lid, cid) != rlock_protocol::OK){
 		  //what to do it retry failed?	unrecoverable error!
 		  abort();
 	  }
-	  tprintf("retry for lock %llu to client %s returned\n", lid, cid.c_str());
 	  pthread_mutex_lock(&lock_clients_mutex);
   }
   return ret;
@@ -109,7 +102,6 @@ lock_server_cache::release(lock_protocol::lockid_t lid, std::string id,
   ScopedLock ml(&lock_clients_mutex);
   std::map<lock_protocol::lockid_t, client_info>::iterator it = lock_clients.find(lid);
   if(it != lock_clients.end() && it->second.cid == id) {
-	  tprintf("releasing lock %llu from client %s\n", lid, id.c_str());
 	  it->second.available = true;
       pthread_cond_signal(&lock_clients[lid].cond);		//wake up the thread who is acquiring this lock
   }/* else {

@@ -48,7 +48,6 @@ if the lock is held by another client and no other clients are waiting for it, r
 if the lock is held by another client and some clients are waiting for it, rpcc acquire() return RETRY immediately.
 */
 		  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
-		  tprintf("thread %lu: call rpc acuqire for lock %llu from client %s\n", pthread_self(), lid, id.c_str());
 		  while((ret = cl->call(lock_protocol::acquire, lid, id, r)) == lock_protocol::RETRY){	// waiting for retry msg
 			  pthread_mutex_lock(&lm);
 			  while(!locks[lid].retry)		//retry msg not come yet
@@ -56,7 +55,6 @@ if the lock is held by another client and some clients are waiting for it, rpcc 
 			  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
 		  }
 		  pthread_mutex_lock(&lm);
-		  tprintf("thread %lu: rpc acuqire returned for lock %llu from client %s\n", pthread_self(), lid, id.c_str());
 		  VERIFY (ret == lock_protocol::OK);
 		  locks[lid].stat = LOCKED;
 
@@ -65,11 +63,9 @@ if the lock is held by another client and some clients are waiting for it, rpcc 
 	  case LOCKED:
 	  case RELEASING:
 		  // wait until lock available (FREE, NONE)
-		  tprintf("thread %lu: wait lock %llu to be available\n", pthread_self(), lid);
 		  while(locks[lid].stat != FREE && locks[lid].stat != NONE){
 			  pthread_cond_wait(&locks[lid].lcond, &lm);
 		  }
-		  tprintf("thread %lu: lock %llu is available\n", pthread_self(), lid);
 		  goto begin;
 		  break;
 	  case FREE:
@@ -99,9 +95,7 @@ lock_client_cache::release(lock_protocol::lockid_t lid)
 		locks[lid].stat = RELEASING;
 		int r;
 		pthread_mutex_unlock(&lm);
-		tprintf("thread %lu: release lock %llu from client %s\n", pthread_self(), lid, id.c_str());
 		ret = cl->call(lock_protocol::release, lid, id, r);
-		tprintf("thread %lu: lock %llu released from client %s\n", pthread_self(), lid, id.c_str());
 		VERIFY (ret == lock_protocol::OK);
 		pthread_mutex_lock(&lm);
 		locks[lid].stat = NONE;
@@ -124,9 +118,7 @@ lock_client_cache::revoke_handler(lock_protocol::lockid_t lid,
   if(locks[lid].stat == FREE){   //return to server immediately
 	  int r;
 	  pthread_mutex_unlock(&lm);
-	  tprintf("thread %lu: release lock %llu in revoke_handler in client %s\n", pthread_self(), lid, id.c_str());
 	  ret = cl->call(lock_protocol::release, lid, id, r);
-	  tprintf("thread %lu: lock %llu has been released in revoke_handler in client %s\n", pthread_self(), lid, id.c_str());
 	  VERIFY (ret == lock_protocol::OK);
 	  pthread_mutex_lock(&lm);
 	  locks[lid].stat = NONE;
@@ -142,7 +134,6 @@ lock_client_cache::retry_handler(lock_protocol::lockid_t lid,
   int ret = rlock_protocol::OK;
   ScopedLock sl(&lm);
   locks[lid].retry = true;
-  tprintf("thread %lu: retry_handler for lock %llu in client %s\n", pthread_self(), lid, id.c_str());
   pthread_cond_signal(&locks[lid].retry_cond);
   return ret;
 }
