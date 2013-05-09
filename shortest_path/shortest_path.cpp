@@ -15,6 +15,7 @@ struct edge{
 };
 
 #define INFINITY	10000000
+#define NO_PATH		"no path"
 
 int id = 0;					// id generator
 map<string, int> city_id;	// city name => array index mapping
@@ -42,7 +43,7 @@ void build_graph(const char* city_info_file)
 	while(fin>>src){
 		fin>>dest>>length;
 		if(length >= INFINITY){
-			cerr<<"length of ( "<<src<<", "<<dest<<" ) is too long, must less than "<<INFINITY<<endl;
+			cerr<<endl<<"length of ("<<src<<", "<<dest<<") is too long, must less than "<<INFINITY<<endl;
 			exit(0);
 		}
 		if(city_id.find(src) == city_id.end()){
@@ -71,28 +72,19 @@ void build_graph(const char* city_info_file)
 		dist[s*nvertices+d] = l;
 	}
 
+	//allocation for path info
 	next = new int[nvertices*nvertices];
 	for(int i=0; i<nvertices; i++)
 		for(int j=0; j<nvertices; j++)
-			next[i*nvertices+j] = -1;	// -1 means no intermediate vertices
-	/*
-	map<string, int>::iterator it;
-	for(it=city_id.begin(); it!=city_id.end(); it++){
-		cout<<it->first<<", "<<it->second<<endl;
-	}
-	for(int i=0; i<nvertices; i++){
-		for(int j=0; j<nvertices; j++)
-			cout<<dist[i*nvertices+j]<<"\t";
-		cout<<endl;
-	}*/
+			next[i*nvertices+j] = -1;	// -1 means no intermediate vertices between vertex i and vertex j
 	cout<<"finished."<<endl;
 }
 
-string path (int i, int j)
+string path(int i, int j)
 {
 	int n = nvertices;
 	if (dist[i*n+j] == INFINITY)
-		return "no path";
+		return NO_PATH;
 	int interm = next[i*n+j];
 	if (interm == -1){
 		return " ";  // the direct edge from i to j gives the shortest path
@@ -114,23 +106,6 @@ void floyd()
 					next[i*n+j] = k;
 				}
 	cout<<"finished."<<endl<<endl;
-	/*
-	for(int i=0; i<n; i++){
-		for(int j=0; j<n; j++){
-			if(dist[i*n+j]>=INFINITY)
-				cout<<"INFINITY"<<"\t";
-			else
-				cout<<dist[i*n+j]<<"\t";
-		}
-		cout<<endl;
-	}
-	for(int i=0; i<n; i++){
-		for(int j=0; j<n; j++)
-			cout<<path(i, j)<<"\t";
-		cout<<endl;
-	}
-	*/
-
 }
 
 void handle_user_input()
@@ -154,15 +129,21 @@ void handle_user_input()
 		int i = city_id[src];
 		int j = city_id[dest];
 		if(!err_city){
-			cout<<"the shortest path between '("<<src<<" "<<dest<<")' is: "
-				<<id_city[i]<<path(i, j)<<id_city[j]<<endl;
-			cout<<"length of the shortest path is: "<<dist[i*nvertices+j]<<endl;
+			string tmp = path(i, j);
+			if(tmp == NO_PATH)
+				cout<<"no path between '("<<src<<" "<<dest<<")'"<<endl;
+			else {
+				cout<<"the shortest path between '("<<src<<" "<<dest<<")' is: "
+					<<id_city[i]<<tmp<<id_city[j]<<endl;
+				cout<<"length of the shortest path is: "<<dist[i*nvertices+j]<<endl;
+			}
 		}
 		cout<<"continue? [y/n]"<<endl;
 		string s;
 		cin>>s;
 		cont = s == "y"? true : false;
 	}
+	cout<<"bye bye"<<endl;
 }
 
 int main(int argc, char* argv[])
