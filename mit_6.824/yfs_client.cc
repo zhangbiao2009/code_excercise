@@ -147,10 +147,12 @@ yfs_client::create(inum parent, const char *name, inum& ino)
 {
 	int r = OK;
 	lc->acquire(parent);
-	//check existence
+	ino = new_file_inum();
+	lc->acquire(ino);
 	std::vector<dirent> dirents;
 	dirent d;
-	r = readdir(parent, dirents);
+	//check existence
+	r = readdir_internal(parent, dirents);
 	if(r != OK)
 		goto release;
 
@@ -160,8 +162,6 @@ yfs_client::create(inum parent, const char *name, inum& ino)
 			goto release;
 		}
 
-	//create a file
-	ino = new_file_inum();
 	if(ec->put(ino, "") != extent_protocol::OK){
 		r = IOERR;
 		goto release;
@@ -173,6 +173,7 @@ yfs_client::create(inum parent, const char *name, inum& ino)
 	r = writedir(parent, dirents);
 release:
 	lc->release(parent);
+	lc->release(ino);
 	return r;
 }
 
@@ -183,20 +184,21 @@ yfs_client::unlink(inum parent, const char *name)
 	lc->acquire(parent);
 	//check existence
 	std::vector<yfs_client::dirent> dirents;
-	if(readdir(parent, dirents) != OK){
+	if(readdir_internal(parent, dirents) != OK){
 		r = NOENT;
-		goto release;
+		lc->release(parent);
+		return r;
 	}
 	std::vector<dirent>::size_type i;
 	for(i=0; i<dirents.size(); i++)
 		if(std::string(name) == dirents[i].name)
 			break;
 
+	lc->acquire(dirents[i].inum);
 	if(i == dirents.size() || isdir(dirents[i].inum)){ //not found or is a directory
 		r = NOENT;
 		goto release;
 	}
-
 	if(ec->remove(dirents[i].inum) != extent_protocol::OK){
 		r = IOERR;
 		goto release;
@@ -209,6 +211,7 @@ yfs_client::unlink(inum parent, const char *name)
 		r = IOERR;
 release:
 	lc->release(parent);
+	lc->release(dirents[i].inum);
 	return r;
 }
 
@@ -220,19 +223,22 @@ yfs_client::mkdir(inum parent, const char *name, inum& ino)
 	//check existence
 	std::vector<yfs_client::dirent> dirents;
 	dirent d;
-	if(readdir(parent, dirents) != OK){
+	if(readdir_internal(parent, dirents) != OK){
 		r = NOENT;
-		goto release;
+		lc->release(parent);
+		return r;
 	}
 
 	for(std::vector<dirent>::size_type i=0; i<dirents.size(); i++)
 		if(std::string(name) == dirents[i].name){
 			r = EXIST;
-			goto release;
+			lc->release(parent);
+			return r;
 		}
 
 	//call yfs_client to create a directory 
 	ino = new_dir_inum();
+	lc->acquire(ino);
 
 	if(ec->put(ino, "") != extent_protocol::OK){
 		r = IOERR;
@@ -248,11 +254,22 @@ yfs_client::mkdir(inum parent, const char *name, inum& ino)
 
 release:
 	lc->release(parent);
+	lc->release(ino);
 	return r;
 }
 
 int 
 yfs_client::readdir(inum inum, std::vector<dirent>& dirents)
+{
+	int r = OK;
+	lc->acquire(inum);
+	r = readdir_internal(inum, dirents);
+	lc->release(inum);
+	return r;
+}
+
+int 
+yfs_client::readdir_internal(inum inum, std::vector<dirent>& dirents)
 {
 	std::string buf;
 	if(ec->get(inum, buf)!= extent_protocol::OK){
@@ -298,11 +315,14 @@ yfs_client::writedir(inum inum, const std::vector<dirent>& dirents)
 int
 yfs_client::read(inum inum, size_t size, off_t off, std::string& buf)
 {
+	lc->acquire(inum);
 	std::string tmpbuf;
 	if(ec->get(inum, tmpbuf)!= extent_protocol::OK){
+		lc->release(inum);
 		return IOERR;
 	}
 	buf = tmpbuf.substr(off, size);
+	lc->release(inum);
 	return OK;
 }
 

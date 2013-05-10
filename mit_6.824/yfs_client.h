@@ -41,6 +41,7 @@ class yfs_client {
   static std::string i2n(inum);
   inum new_uniq_number();
   std::set<inum> used_nums_;
+  int readdir_internal(inum, std::vector<dirent>&);
  public:
 
   yfs_client(std::string, std::string);

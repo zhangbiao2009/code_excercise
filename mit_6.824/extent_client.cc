@@ -23,7 +23,15 @@ extent_protocol::status
 extent_client::get(extent_protocol::extentid_t eid, std::string &buf)
 {
   extent_protocol::status ret = extent_protocol::OK;
-  ret = cl->call(extent_protocol::get, eid, buf);
+  if(cached_extents.find(eid) != cached_extents.end()){
+	  buf = cached_extents[eid];
+	  cached_attrs[eid].atime = time(NULL);
+  }
+  else{
+	  ret = cl->call(extent_protocol::get, eid, buf);
+	  if(ret == extent_protocol::OK)
+		  cached_extents[eid] = buf;
+  }
   return ret;
 }
 
@@ -32,7 +40,13 @@ extent_client::getattr(extent_protocol::extentid_t eid,
 		       extent_protocol::attr &attr)
 {
   extent_protocol::status ret = extent_protocol::OK;
-  ret = cl->call(extent_protocol::getattr, eid, attr);
+  if(cached_extents.find(eid) != cached_extents.end())
+	  attr = cached_attrs[eid];
+  else{
+	  ret = cl->call(extent_protocol::getattr, eid, attr);
+	  if(ret == extent_protocol::OK)
+		  cached_attrs[eid] = attr;
+  }
   return ret;
 }
 
@@ -42,6 +56,9 @@ extent_client::setattr(extent_protocol::extentid_t eid,
 {
   extent_protocol::status ret = extent_protocol::OK;
   int r;
+  cached_attrs[eid] = attr;
+  dirty_attrs.insert(eid);
+  return ret;
   ret = cl->call(extent_protocol::setattr, eid, attr, r);
   return ret;
 }
@@ -51,6 +68,12 @@ extent_client::put(extent_protocol::extentid_t eid, std::string buf)
 {
   extent_protocol::status ret = extent_protocol::OK;
   int r;
+  cached_extents[eid] = buf;
+  cached_attrs[eid].size = buf.length();
+  cached_attrs[eid].ctime = cached_attrs[eid].mtime = time(NULL);
+
+  dirty_extents.insert(eid);
+  return ret;
   ret = cl->call(extent_protocol::put, eid, buf, r);
   return ret;
 }
@@ -60,6 +83,14 @@ extent_client::remove(extent_protocol::extentid_t eid)
 {
   extent_protocol::status ret = extent_protocol::OK;
   int r;
+  std::map<extent_protocol::extentid_t, std::string>::iterator it;
+  if((it=cached_extents.find(eid)) == cached_extents.end())
+	  return extent_protocol::NOENT;
+  cached_extents.erase(it);
+  dirty_extents.erase(eid);
+  dirty_attrs.erase(eid);
+  return ret;
+
   ret = cl->call(extent_protocol::remove, eid, r);
   return ret;
 }
