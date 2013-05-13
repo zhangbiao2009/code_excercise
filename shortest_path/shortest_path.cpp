@@ -1,3 +1,4 @@
+#include <climits>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -14,7 +15,7 @@ struct edge{
 	int length;
 };
 
-#define INFINITY	10000000
+#define INFINITY	INT_MAX
 #define NO_PATH		"no path"
 
 int id = 0;					// id generator
@@ -101,10 +102,11 @@ void floyd()
 	for(int k=0; k<n; k++)
 		for(int i=0; i<n; i++)
 			for(int j=0; j<n; j++)
-				if(dist[i*n+k] + dist[k*n+j] < dist[i*n+j]){
+				if(dist[i*n+k] + dist[k*n+j] >= 0 && dist[i*n+k] + dist[k*n+j] < dist[i*n+j]){
 					dist[i*n+j] = dist[i*n+k] + dist[k*n+j];
 					next[i*n+j] = k;
 				}
+	
 	cout<<"finished."<<endl<<endl;
 }
 
