@@ -13,10 +13,20 @@
 
 #define FILE_BASE 0x80000000
 
+class lock_release_flusher : public lock_release_user{
+	public:
+		lock_release_flusher (extent_client *ec_) : ec(ec_) {}
+		virtual void dorelease(lock_protocol::lockid_t lid)
+		{ ec->flush(lid); }
+	private:
+		extent_client* ec;
+};
+
 yfs_client::yfs_client(std::string extent_dst, std::string lock_dst)
 {
   ec = new extent_client(extent_dst);
-  lc = new lock_client_cache(lock_dst);
+  lock_release_user* lu = new lock_release_flusher(ec);
+  lc = new lock_client_cache(lock_dst, lu);
 }
 
 yfs_client::inum
@@ -66,6 +76,7 @@ yfs_client::getfile(inum inum, fileinfo &fin)
   // - hold and release the file lock
 
   printf("getfile %016llx\n", inum);
+  lc->acquire(inum);
   extent_protocol::attr a;
   if (ec->getattr(inum, a) != extent_protocol::OK) {
     r = IOERR;
@@ -79,6 +90,7 @@ yfs_client::getfile(inum inum, fileinfo &fin)
   printf("getfile %016llx -> sz %llu\n", inum, fin.size);
 
  release:
+  lc->release(inum);
   return r;
 }
 
@@ -92,9 +104,11 @@ yfs_client::setattr(inum inum, struct stat st)
   a.mtime = st.st_mtime;
   a.ctime = st.st_ctime;
   
+  lc->acquire(inum);
   if (ec->setattr(inum, a) != extent_protocol::OK){
     r = IOERR;
   }
+  lc->release(inum);
   return r;
 }
 
@@ -107,6 +121,7 @@ yfs_client::getdir(inum inum, dirinfo &din)
   // - hold and release the directory lock
 
   printf("getdir %016llx\n", inum);
+  lc->acquire(inum);
   extent_protocol::attr a;
   if (ec->getattr(inum, a) != extent_protocol::OK) {
     r = IOERR;
@@ -117,6 +132,7 @@ yfs_client::getdir(inum inum, dirinfo &din)
   din.ctime = a.ctime;
 
  release:
+  lc->release(inum);
   return r;
 }
 

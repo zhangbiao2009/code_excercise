@@ -95,6 +95,8 @@ lock_client_cache::release(lock_protocol::lockid_t lid)
 		locks[lid].stat = RELEASING;
 		int r;
 		pthread_mutex_unlock(&lm);
+		if(lu)
+			lu->dorelease(lid);
 		ret = cl->call(lock_protocol::release, lid, id, r);
 		VERIFY (ret == lock_protocol::OK);
 		pthread_mutex_lock(&lm);
@@ -118,6 +120,8 @@ lock_client_cache::revoke_handler(lock_protocol::lockid_t lid,
   if(locks[lid].stat == FREE){   //return to server immediately
 	  int r;
 	  pthread_mutex_unlock(&lm);
+	  if(lu)
+		  lu->dorelease(lid);
 	  ret = cl->call(lock_protocol::release, lid, id, r);
 	  VERIFY (ret == lock_protocol::OK);
 	  pthread_mutex_lock(&lm);

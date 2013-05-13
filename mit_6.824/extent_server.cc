@@ -23,6 +23,8 @@ int extent_server::put(extent_protocol::extentid_t id, std::string buf, int &)
 {
 	ScopedLock l(&m_);
 	extents_[id] = buf;
+	if(attrs_.find(id) == attrs_.end())
+		attrs_[id].atime = time(NULL);
 	attrs_[id].size = buf.length();
 	attrs_[id].ctime = attrs_[id].mtime = time(NULL);
 	return extent_protocol::OK;
@@ -64,6 +66,7 @@ int extent_server::remove(extent_protocol::extentid_t id, int &)
 	if((it=extents_.find(id)) == extents_.end())
 		return extent_protocol::NOENT;
 	extents_.erase(it);
+	attrs_.erase(id);
 	return extent_protocol::OK;
 }
 
