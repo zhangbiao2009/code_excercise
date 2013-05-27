@@ -13,7 +13,7 @@ lock_client::lock_client(std::string dst)
   sockaddr_in dstsock;
   make_sockaddr(dst.c_str(), &dstsock);
   cl = new rpcc(dstsock);
-  if (cl->bind() < 0) {
+  if (cl->bind(rpcc::to(1000)) < 0) {
     printf("lock_client: call bind\n");
   }
 }
