@@ -150,7 +150,6 @@ proposer::prepare(unsigned instance, std::vector<std::string> &accepts,
          std::vector<std::string> nodes,
          std::string &v)
 {
-	// You fill this in for Lab 6
 	// Note: if got an "oldinstance" reply, commit the instance using
 	// acc->commit(...), and return false.
 	prop_t currn_a;
@@ -195,7 +194,6 @@ void
 proposer::accept(unsigned instance, std::vector<std::string> &accepts,
         std::vector<std::string> nodes, std::string v)
 {
-	// You fill this in for Lab 6
 	for(int i=0; i<nodes.size(); i++){
 		handle h(nodes[i]);
 		rpcc *cl = h.safebind();
@@ -222,7 +220,6 @@ void
 proposer::decide(unsigned instance, std::vector<std::string> accepts, 
 	      std::string v)
 {
-	// You fill this in for Lab 6
 	for(int i=0; i<accepts.size(); i++){
 		handle h(accepts[i]);
 		rpcc *cl = h.safebind();
@@ -270,18 +267,8 @@ paxos_protocol::status
 acceptor::preparereq(std::string src, paxos_protocol::preparearg a,
     paxos_protocol::prepareres &r)
 {
-  // You fill this in for Lab 6
   // Remember to initialize *BOTH* r.accept and r.oldinstance appropriately.
   // Remember to *log* the proposal if the proposal is accepted.
-/*
- if instance <= instance_h
-   reply oldinstance(instance, instance_value)
- else if n > n_h
-   n_h = n
-   reply prepare_ok(n_a, v_a)
- else
-   reply prepare_reject
-*/
 	ScopedLock ml(&pxs_mutex);
   tprintf("preparereq for instance %d (my instance %d)\n", 
 	 a.instance, instance_h);
@@ -306,16 +293,7 @@ acceptor::preparereq(std::string src, paxos_protocol::preparearg a,
 paxos_protocol::status
 acceptor::acceptreq(std::string src, paxos_protocol::acceptarg a, bool &r)
 {
-  // You fill this in for Lab 6
   // Remember to *log* the accept if the proposal is accepted.
-/*
- if n >= n_h
-   n_a = n
-   v_a = v
-   reply accept_ok(n)
- else
-   reply accept_reject
-*/
 
   ScopedLock ml(&pxs_mutex);
   tprintf("acceptreq for prepared instance %d (my instance %d) v=%s\n", 
