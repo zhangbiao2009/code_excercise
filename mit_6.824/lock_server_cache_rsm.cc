@@ -49,11 +49,13 @@ lock_server_cache_rsm::revoker()
 		lock_protocol::lockid_t lid;
 		// sends revoke message to lock holder
 		revoker_queue.deq(&lid);
+		tprintf("send revoke msg to cid=%s for lid=%llu\n", lock_clients[lid].cid.c_str(), lid);
 		if(call_client_rpc(rlock_protocol::revoke, lid, lock_clients[lid].cid, lock_clients[lid].xid) != rlock_protocol::OK){
 			// what to do it revoke failed?	unrecoverable error!
 			abort();
 		}
 
+		tprintf("lock_server_cache_rsm::revoker: add lid=%llu to retryer_queue\n", lid);
 		// notify retrythread
 		retryer_queue.enq(lid);
 	}
@@ -82,6 +84,7 @@ lock_server_cache_rsm::retryer()
 		std::string cid = *lock_clients[lid].waited_clients.begin();
 		/* pass 0 as xid temporarily as xid is not so useful for retry handler */
 		pthread_mutex_unlock(&lock_clients_mutex);
+		tprintf("send retry msg to cid=%s for lid=%llu\n", cid.c_str(), lid);
 		if(call_client_rpc(rlock_protocol::retry, lid, cid, 0) != rlock_protocol::OK){
 			//what to do it retry failed?	unrecoverable error!
 			abort();
@@ -113,40 +116,66 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
   ScopedLock ml(&lock_clients_mutex);
   // check if it is a duplicated request
   if(lock_clients.find(lid) != lock_clients.end() && id == lock_clients[lid].cid 
-		  && xid == lock_clients[lid].xid)
+		  && xid == lock_clients[lid].xid){
+	  tprintf("lock_server_cache_rsm::acquire: duplicate request for lock %llu from %s, xid=%llu \n", lid, id.c_str(), xid);
 	  return ret;
+  }
 
   // it's a new request or a retry request
 
   //the first requester of this lock
   if(lock_clients.find(lid) == lock_clients.end()){
+	  tprintf("lock_server_cache_rsm::acquire: here0, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
 	  lock_clients.insert(std::pair<lock_protocol::lockid_t, client_info>(lid, client_info(id, xid, false)));
 	  return ret;
   }
 
   std::set<std::string>* waited_clts = &lock_clients[lid].waited_clients;
+  std::set<std::string>::iterator it;
+  tprintf("waited_clts content:\t");
+  for(it=waited_clts->begin(); it!= waited_clts->end(); it++)
+	  printf("%s,", (*it).c_str());
+  printf("\n");
+
+  if(lock_clients[lid].available){
+	  tprintf("lock lid=%llu is available\n", lid);
+  }else{
+	  tprintf("current lock holder of lid=%llu: %s\n", lid, lock_clients[lid].cid.c_str());
+  }
+
   // there's other clients expect current client already in the waited_clts, so I'm a late comer
   if(!waited_clts->empty() && waited_clts->find(id) == waited_clts->end()){
+	  tprintf("lock_server_cache_rsm::acquire: here1, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
+	  tprintf("waited_clt insert id=%s\n", id.c_str());
 	  waited_clts->insert(id);
 	  return lock_protocol::RETRY;
   }
   if(!lock_clients[lid].available){
+	  tprintf("lock_server_cache_rsm::acquire: here2, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
+	  tprintf("waited_clt insert id=%s\n", id.c_str());
 	  waited_clts->insert(id);
 	  //notify revoke thread 
-	  revoker_queue.enq(lid);
+	  if(rsm->amiprimary()){
+		  tprintf("lock_server_cache_rsm::acquire: add lid=%llu to revoker_queue\n", lid);
+		  revoker_queue.enq(lid);
+	  }
 	  return lock_protocol::RETRY;
   }
 
+	  tprintf("lock_server_cache_rsm::acquire: here3, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
   //lock is available
   lock_clients[lid].cid = id;
   lock_clients[lid].xid = xid;
   lock_clients[lid].available = false;
 
   //remove current client from waited clients set (if exists)
+  tprintf("waited_clt remove id=%s\n", id.c_str());
   waited_clts->erase(id);
 
-  if(!waited_clts->empty())	// ask the lock holder releasing the lock ASAP and send retry to one of waited clients
+  if(!waited_clts->empty() && rsm->amiprimary()){	// ask the lock holder releasing the lock ASAP and send retry to one of waited clients
+	  tprintf("lock_server_cache_rsm::acquire: add lid=%llu to revoker_queue\n", lid);
 	  revoker_queue.enq(lid);
+  }
 
   return ret;
 }
@@ -169,6 +198,7 @@ lock_server_cache_rsm::release(lock_protocol::lockid_t lid, std::string id,
       ret = lock_protocol::NOENT;
   }*/
   r = lid;
+  tprintf("lock_server_cache_rsm::release: here1, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
   return ret;
 }
 

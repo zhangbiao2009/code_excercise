@@ -40,6 +40,8 @@ lock_client_cache_rsm::lock_client_cache_rsm(std::string xdst,
   // You fill this in Step Two, Lab 7
   // - Create rsmc, and use the object to do RPC 
   //   calls instead of the rpcc object of lock_client
+
+  rsmc = new rsm_client(xdst);
   pthread_t th;
   int r = pthread_create(&th, NULL, &releasethread, (void *) this);
   VERIFY (r == 0);
@@ -63,7 +65,9 @@ lock_client_cache_rsm::acquire(lock_protocol::lockid_t lid)
 {
   lock_protocol::status ret = lock_protocol::OK;
   ScopedLock sl(&lm);
+  tprintf("lock_client_cache_rsm::acquire: acquire lock begin: lid=%llu\n", lid);
 begin:
+  tprintf("lock_client_cache_rsm::acquire: lock lid=%llu stat=%d\n", lid, locks[lid].stat);
   switch(locks[lid].stat){		// if locks[lid] doesn't exist, it'll be created automatically.
 	  case NONE:
 		  //rpc acquire
@@ -75,10 +79,13 @@ if the lock is held by another client, rpcc acquire() return RETRY immediately.
 */
 		  xid++;
 		  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
-		  while((ret = cl->call(lock_protocol::acquire, lid, id, xid, r)) == lock_protocol::RETRY){	// waiting for retry msg
+		  tprintf("lock_client_cache_rsm::acquire: begin rpc acquire\n");
+		  while((ret = rsmc->call(lock_protocol::acquire, lid, id, xid, r)) == lock_protocol::RETRY){	// waiting for retry msg
+			  tprintf("lock_client_cache_rsm::acquire: returns RETRY\n");
 			  pthread_mutex_lock(&lm);
 			  while(!locks[lid].retry)		//retry msg not come yet
 				  pthread_cond_wait(&locks[lid].retry_cond, &lm);
+			  locks[lid].retry = false;		// reset to false
 			  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
 		  }
 		  pthread_mutex_lock(&lm);
@@ -96,6 +103,7 @@ if the lock is held by another client, rpcc acquire() return RETRY immediately.
 		  goto begin;
 		  break;
 	  case FREE:
+		  tprintf("lock_client_cache_rsm::acquire: acquire freed lock: lid=%llu\n", lid);
 		  locks[lid].stat = LOCKED;
 		  break;
   }
@@ -109,12 +117,14 @@ lock_client_cache_rsm::release(lock_protocol::lockid_t lid)
 	lock_protocol::status ret = lock_protocol::OK;
 
 	ScopedLock sl(&lm);
+  tprintf("lock_client_cache_rsm::release: release lock begin: lid=%llu\n", lid);
 	if(locks[lid].stat == NONE)	//nothing to do
 		return ret;
 
 	assert(locks[lid].stat == LOCKED || locks[lid].stat == FREE);
 
 	if(!locks[lid].revoked){	//lock cache can be used, just set lock stat, not release back to server
+		tprintf("lock_client_cache_rsm::release: not revoked,just set free: lid=%llu\n", lid);
 		locks[lid].stat = FREE;
 	}
 	else{	//must release back to server
@@ -123,7 +133,8 @@ lock_client_cache_rsm::release(lock_protocol::lockid_t lid)
 		pthread_mutex_unlock(&lm);
 		if(lu)
 			lu->dorelease(lid);
-		ret = cl->call(lock_protocol::release, lid, id, xid, r);
+		tprintf("lock_client_cache_rsm::release: revoked, call release rpc: lid=%llu\n", lid);
+		ret = rsmc->call(lock_protocol::release, lid, id, xid, r);
 		VERIFY (ret == lock_protocol::OK);
 		pthread_mutex_lock(&lm);
 		locks[lid].stat = NONE;
@@ -142,17 +153,20 @@ lock_client_cache_rsm::revoke_handler(lock_protocol::lockid_t lid,
   int ret = rlock_protocol::OK;
 
   ScopedLock sl(&lm);
+  tprintf("lock_client_cache_rsm::revoke_handler: lid=%llu, xid=%llu\n", lid, xid);
   locks[lid].revoked = true;
   if(locks[lid].stat == FREE){   //return to server immediately
 	  int r;
+	  locks[lid].stat = RELEASING;
 	  pthread_mutex_unlock(&lm);
 	  if(lu)
 		  lu->dorelease(lid);
-	  ret = cl->call(lock_protocol::release, lid, id, xid, r);
+	  ret = rsmc->call(lock_protocol::release, lid, id, xid, r);
 	  VERIFY (ret == lock_protocol::OK);
 	  pthread_mutex_lock(&lm);
 	  locks[lid].stat = NONE;
 	  locks[lid].revoked = false;
+	  pthread_cond_signal(&locks[lid].lcond);
   }
   return ret; 	//just return, the lock holder will call release() later, which will return the lock to server
 }
@@ -163,6 +177,7 @@ lock_client_cache_rsm::retry_handler(lock_protocol::lockid_t lid,
 {
   int ret = rlock_protocol::OK;
   ScopedLock sl(&lm);
+  tprintf("lock_client_cache_rsm::retry_handler: lid=%llu, xid=%llu\n", lid, xid);
   locks[lid].retry = true;
   pthread_cond_signal(&locks[lid].retry_cond);
   return ret;

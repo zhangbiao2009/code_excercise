@@ -323,7 +323,7 @@ rsm::commit_change_wo(unsigned vid)
 void
 rsm::execute(int procno, std::string req, std::string &r)
 {
-  tprintf("execute\n");
+  tprintf("execute: procno=0x%x\n", procno);
   handler *h = procs[procno];
   VERIFY(h);
   unmarshall args(req);
@@ -347,6 +347,44 @@ rsm::client_invoke(int procno, std::string req, std::string &r)
 {
   int ret = rsm_client_protocol::OK;
   // You fill this in for Lab 7
+  ScopedLock ml(&rsm_mutex);
+  if (inviewchange){
+	  tprintf("client_invoke: here1\n");
+	  return rsm_client_protocol::BUSY;
+  }
+  if (primary != cfg->myaddr()){
+	  return rsm_client_protocol::NOTPRIMARY;
+  }
+
+  //first assigns the RPC the next viewstamp number in sequence, and send an invoke RPC to all slaves in the current view. 
+  std::vector<std::string> mems = cfg->get_view(vid_commit);
+  pthread_mutex_unlock(&rsm_mutex);
+  {
+	  ScopedLock iml(&invoke_mutex);
+	  int dummy;
+	  for(int i=0; i<mems.size(); i++){
+		  if (mems[i] == cfg->myaddr()) 	// excludes primary node
+			  continue;
+		  handle h(mems[i]);
+		  rpcc *cl = h.safebind();
+		  if (cl != 0) {
+			  tprintf("client_invoke: send invoke to %s\n", mems[i].c_str());
+			  ret = cl->call(rsm_protocol::invoke, procno, myvs, req,
+					  dummy, rpcc::to(10000));
+			  if(ret != rsm_protocol::OK){
+				  tprintf("client_invoke: here2, ret=%d\n", ret);
+				  return rsm_client_protocol::BUSY;
+			  }
+		  }
+	  }
+
+	  execute(procno, req, r);
+	  last_myvs = myvs;
+	  myvs.seqno++;
+  }
+  pthread_mutex_lock(&rsm_mutex);
+
+
   return ret;
 }
 
@@ -362,6 +400,28 @@ rsm::invoke(int proc, viewstamp vs, std::string req, int &dummy)
 {
   rsm_protocol::status ret = rsm_protocol::OK;
   // You fill this in for Lab 7
+  ScopedLock ml(&rsm_mutex);
+
+  if(inviewchange || !cfg->ismember(cfg->myaddr(), vid_commit)){
+	  tprintf("rsm::invoke: here1\n");
+	  return rsm_client_protocol::ERR;
+  }
+
+  if(vs.vid != myvs.vid || vs.seqno != myvs.seqno){
+	  tprintf("rsm::invoke: here2\n");
+	  tprintf("rsm::invoke: vs.vid=%u, vs.seqno=%u\n", vs.vid, vs.seqno);
+	  tprintf("rsm::invoke: myvs.vid=%u, myvs.seqno=%u\n", myvs.vid, myvs.seqno);
+	  return rsm_client_protocol::ERR;
+  }
+
+  std::string r;
+  pthread_mutex_unlock(&rsm_mutex);		//unlock because acquire() may call rsm::amiprimary(), which will cause deadlock
+  execute(proc, req, r);
+  pthread_mutex_lock(&rsm_mutex);
+  //todo: is it right to update last_myvs and myvs in slave??
+  last_myvs = myvs;
+  myvs.seqno++;
+
   return ret;
 }
 

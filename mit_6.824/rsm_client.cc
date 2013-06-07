@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <handle.h>
 #include "lang/verify.h"
+#include "tprintf.h"
 
 
 rsm_client::rsm_client(std::string dst)
@@ -36,7 +37,7 @@ rsm_client::invoke(int proc, std::string req, std::string &rep)
   int ret;
   ScopedLock ml(&rsm_client_mutex);
   while (1) {
-    printf("rsm_client::invoke proc %x primary %s\n", proc, primary.c_str());
+    tprintf("rsm_client(%p)::invoke proc %x primary %s\n", this, proc, primary.c_str());
     handle h(primary);
 
     VERIFY(pthread_mutex_unlock(&rsm_client_mutex)==0);
@@ -51,26 +52,26 @@ rsm_client::invoke(int proc, std::string req, std::string &rep)
       goto prim_fail;
     }
 
-    printf("rsm_client::invoke proc %x primary %s ret %d\n", proc, 
+    tprintf("rsm_client(%p)::invoke proc %x primary %s ret %d\n", this, proc, 
            primary.c_str(), ret);
     if (ret == rsm_client_protocol::OK) {
       break;
     }
     if (ret == rsm_client_protocol::BUSY) {
-      printf("rsm is busy %s\n", primary.c_str());
+      tprintf("rsm is busy %s\n", primary.c_str());
       sleep(3);
       continue;
     }
     if (ret == rsm_client_protocol::NOTPRIMARY) {
-      printf("primary %s isn't the primary--let's get a complete list of mems\n", 
+      tprintf("primary %s isn't the primary--let's get a complete list of mems\n", 
              primary.c_str());
       if (init_members())
         continue;
     }
 prim_fail:
-    printf("primary %s failed ret %d\n", primary.c_str(), ret);
+    tprintf("primary %s failed ret %d\n", primary.c_str(), ret);
     primary_failure();
-    printf ("rsm_client::invoke: retry new primary %s\n", primary.c_str());
+    tprintf ("rsm_client(%p)::invoke: retry new primary %s\n", this, primary.c_str());
   }
   return ret;
 }

@@ -3,6 +3,7 @@
 
 #include "rpc.h"
 #include "rsm_protocol.h"
+#include "tprintf.h"
 #include <string>
 #include <vector>
 
