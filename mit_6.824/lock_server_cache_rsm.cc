@@ -30,6 +30,7 @@ lock_server_cache_rsm::lock_server_cache_rsm(class rsm *_rsm)
   : rsm (_rsm)
 {
   pthread_t th;
+  rsm->set_state_transfer(this);
   int r = pthread_create(&th, NULL, &revokethread, (void *) this);
   VERIFY (r == 0);
   r = pthread_create(&th, NULL, &retrythread, (void *) this);
@@ -49,8 +50,8 @@ lock_server_cache_rsm::revoker()
 		lock_protocol::lockid_t lid;
 		// sends revoke message to lock holder
 		revoker_queue.deq(&lid);
-		tprintf("send revoke msg to cid=%s for lid=%llu\n", lock_clients[lid].cid.c_str(), lid);
-		if(call_client_rpc(rlock_protocol::revoke, lid, lock_clients[lid].cid, lock_clients[lid].xid) != rlock_protocol::OK){
+		tprintf("send revoke msg to cid=%s for lid=%llu\n", lock_clients[lid]->cid.c_str(), lid);
+		if(call_client_rpc(rlock_protocol::revoke, lid, lock_clients[lid]->cid, lock_clients[lid]->xid) != rlock_protocol::OK){
 			// what to do it revoke failed?	unrecoverable error!
 			abort();
 		}
@@ -75,13 +76,13 @@ lock_server_cache_rsm::retryer()
 		retryer_queue.deq(&lid);
 		// wait until the lock has been released
 		pthread_mutex_lock(&lock_clients_mutex);
-		while(!lock_clients[lid].available)
-			pthread_cond_wait(&lock_clients[lid].cond, &lock_clients_mutex);		//wait the lock holder release the lock
+		while(!lock_clients[lid]->available)
+			pthread_cond_wait(&lock_clients[lid]->cond, &lock_clients_mutex);		//wait the lock holder release the lock
 
 		//send a retry to one of waited clients
-		assert(!lock_clients[lid].waited_clients.empty());
+		assert(!lock_clients[lid]->waited_clients.empty());
 
-		std::string cid = *lock_clients[lid].waited_clients.begin();
+		std::string cid = *lock_clients[lid]->waited_clients.begin();
 		/* pass 0 as xid temporarily as xid is not so useful for retry handler */
 		pthread_mutex_unlock(&lock_clients_mutex);
 		tprintf("send retry msg to cid=%s for lid=%llu\n", cid.c_str(), lid);
@@ -115,8 +116,8 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
 
   ScopedLock ml(&lock_clients_mutex);
   // check if it is a duplicated request
-  if(lock_clients.find(lid) != lock_clients.end() && id == lock_clients[lid].cid 
-		  && xid == lock_clients[lid].xid){
+  if(lock_clients.find(lid) != lock_clients.end() && id == lock_clients[lid]->cid 
+		  && xid == lock_clients[lid]->xid){
 	  tprintf("lock_server_cache_rsm::acquire: duplicate request for lock %llu from %s, xid=%llu \n", lid, id.c_str(), xid);
 	  return ret;
   }
@@ -126,21 +127,21 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
   //the first requester of this lock
   if(lock_clients.find(lid) == lock_clients.end()){
 	  tprintf("lock_server_cache_rsm::acquire: here0, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
-	  lock_clients.insert(std::pair<lock_protocol::lockid_t, client_info>(lid, client_info(id, xid, false)));
+	  lock_clients[lid] = new client_info(id, xid, false);
 	  return ret;
   }
 
-  std::set<std::string>* waited_clts = &lock_clients[lid].waited_clients;
+  std::set<std::string>* waited_clts = &lock_clients[lid]->waited_clients;
   std::set<std::string>::iterator it;
   tprintf("waited_clts content:\t");
   for(it=waited_clts->begin(); it!= waited_clts->end(); it++)
 	  printf("%s,", (*it).c_str());
   printf("\n");
 
-  if(lock_clients[lid].available){
+  if(lock_clients[lid]->available){
 	  tprintf("lock lid=%llu is available\n", lid);
   }else{
-	  tprintf("current lock holder of lid=%llu: %s\n", lid, lock_clients[lid].cid.c_str());
+	  tprintf("current lock holder of lid=%llu: %s\n", lid, lock_clients[lid]->cid.c_str());
   }
 
   // there's other clients expect current client already in the waited_clts, so I'm a late comer
@@ -150,7 +151,7 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
 	  waited_clts->insert(id);
 	  return lock_protocol::RETRY;
   }
-  if(!lock_clients[lid].available){
+  if(!lock_clients[lid]->available){
 	  tprintf("lock_server_cache_rsm::acquire: here2, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
 	  tprintf("waited_clt insert id=%s\n", id.c_str());
 	  waited_clts->insert(id);
@@ -164,9 +165,9 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
 
 	  tprintf("lock_server_cache_rsm::acquire: here3, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
   //lock is available
-  lock_clients[lid].cid = id;
-  lock_clients[lid].xid = xid;
-  lock_clients[lid].available = false;
+  lock_clients[lid]->cid = id;
+  lock_clients[lid]->xid = xid;
+  lock_clients[lid]->available = false;
 
   //remove current client from waited clients set (if exists)
   tprintf("waited_clt remove id=%s\n", id.c_str());
@@ -188,12 +189,13 @@ lock_server_cache_rsm::release(lock_protocol::lockid_t lid, std::string id,
   ScopedLock ml(&lock_clients_mutex);
 
   // todo: do we need to check duplicate request? for release(), I think it's not harmful executing duplicate requests
-  // todo check: xid must equal to lock_clients[lid].xid, otherwise the client is sending wrong RPC
+  // todo check: xid must equal to lock_clients[lid]->xid, otherwise the client is sending wrong RPC
 
-  std::map<lock_protocol::lockid_t, client_info>::iterator it = lock_clients.find(lid);
-  if(it != lock_clients.end() && it->second.cid == id) {
-	  it->second.available = true;
-      pthread_cond_signal(&lock_clients[lid].cond);		//wake up the retry thread
+  std::map<lock_protocol::lockid_t, client_info*>::iterator it = lock_clients.find(lid);
+  if(it != lock_clients.end() && it->second->cid == id) {
+	  it->second->available = true;
+	  if(rsm->amiprimary())
+		  pthread_cond_signal(&lock_clients[lid]->cond);		//wake up the retry thread
   }/* else {
       ret = lock_protocol::NOENT;
   }*/
@@ -202,17 +204,36 @@ lock_server_cache_rsm::release(lock_protocol::lockid_t lid, std::string id,
   return ret;
 }
 
-std::string
+std::string 
 lock_server_cache_rsm::marshal_state()
 {
-  std::ostringstream ost;
-  std::string r;
-  return r;
+
+  ScopedLock ml(&lock_clients_mutex);
+  marshall rep;
+  rep << (unsigned int)lock_clients.size();
+  std::map <lock_protocol::lockid_t, client_info*>::iterator it;
+  for (it = lock_clients.begin(); it != lock_clients.end(); it++) {
+    rep << it->first;
+    rep << it->second;
+  }
+  return rep.str();
+
 }
 
-void
+void 
 lock_server_cache_rsm::unmarshal_state(std::string state)
 {
+
+  ScopedLock ml(&lock_clients_mutex);
+  unmarshall rep(state);
+  unsigned int locks_size;
+  rep >> locks_size;
+  for (unsigned int i = 0; i < locks_size; i++) {
+	lock_protocol::lockid_t lid;
+    rep >> lid;
+	lock_clients[lid] = new client_info;
+	rep >> lock_clients[lid];
+  }
 }
 
 lock_protocol::status

@@ -189,38 +189,82 @@ rsm::recovery()
 bool
 rsm::sync_with_backups()
 {
+  tprintf("sync_with_backups: here1\n");
   pthread_mutex_unlock(&rsm_mutex);
   {
     // Make sure that the state of lock_server_cache_rsm is stable during 
     // synchronization; otherwise, the primary's state may be more recent
     // than replicas after the synchronization.
+  tprintf("sync_with_backups: here2\n");
     ScopedLock ml(&invoke_mutex);
     // By acquiring and releasing the invoke_mutex once, we make sure that
     // the state of lock_server_cache_rsm will not be changed until all
     // replicas are synchronized. The reason is that client_invoke arrives
     // after this point of time will see inviewchange == true, and returns
     // BUSY.
+  tprintf("sync_with_backups: here3\n");
   }
+  //todo: think what will happen if there is a commited viewchange here??
+  tprintf("sync_with_backups: here4\n");
   pthread_mutex_lock(&rsm_mutex);
+  tprintf("sync_with_backups: here5\n");
+  if(vid_insync != vid_commit){	//if there's a committed viewchange before I get rsm_mutex...
+  tprintf("sync_with_backups: here6\n");
+	  return false;
+  }
+
+  int ret = true;
+  std::vector<std::string> mems = cfg->get_view(vid_commit);
+
+  tprintf("sync_with_backups: here7\n");
+  for (unsigned i  = 0; i < mems.size(); i++) {
+    if (mems[i] != cfg->myaddr()){
+		tprintf("add %s to backups vec\n", mems[i].c_str());
+		backups.push_back(mems[i]);
+	}
+  }
   // Start accepting synchronization request (statetransferreq) now!
   insync = true;
   // You fill this in for Lab 7
   // Wait until
   //   - all backups in view vid_insync are synchronized
   //   - or there is a committed viewchange
+  tprintf("sync_with_backups: here8\n");
+  pthread_cond_wait(&recovery_cond, &rsm_mutex);
+  tprintf("sync_with_backups: here9\n");
+  if(vid_insync != vid_commit)	//wake up because of a committed viewchange
+	  ret = false;
   insync = false;
-  return true;
+  return ret;
 }
 
 
 bool
 rsm::sync_with_primary()
 {
+  // Assumes that rsm_mutex is already held.
   // Remember the primary of vid_insync
   std::string m = primary;
   // You fill this in for Lab 7
   // Keep synchronizing with primary until the synchronization succeeds,
   // or there is a commited viewchange
+  bool sync_ok = false;
+  tprintf("sync_with_primary: here1\n");
+  while(!sync_ok){
+	  if(statetransfer(m) && statetransferdone(m)){
+		  tprintf("sync_with_primary: here2\n");
+		  sync_ok = true;
+	  }
+	  else if(vid_insync != vid_commit){	//there's a commited viewchange
+		  tprintf("sync_with_primary: here3\n");
+		  return false;
+	  }
+	  else{
+		  //sleep and try again later
+		  tprintf("sync_with_primary: here4\n");
+		  sleep(1);
+	  }
+  }
   return true;
 }
 
@@ -260,10 +304,23 @@ rsm::statetransfer(std::string m)
 }
 
 bool
-rsm::statetransferdone(std::string m) {
-  // You fill this in for Lab 7
-  // - Inform primary that this slave has synchronized for vid_insync
-  return true;
+rsm::statetransferdone(std::string m) 
+{
+	// You fill this in for Lab 7
+	// - Inform primary that this slave has synchronized for vid_insync
+	handle h(m);
+	int ret;
+	int r;
+	VERIFY(pthread_mutex_unlock(&rsm_mutex)==0);
+	rpcc *cl = h.safebind();
+	if (cl) {
+		ret = cl->call(rsm_protocol::transferdonereq, cfg->myaddr(), vid_insync, r, rpcc::to(1000));
+	}
+	VERIFY(pthread_mutex_lock(&rsm_mutex)==0);
+
+	if(ret == rsm_protocol::OK)
+		return true;
+	return false;
 }
 
 
@@ -362,7 +419,7 @@ rsm::client_invoke(int procno, std::string req, std::string &r)
   {
 	  ScopedLock iml(&invoke_mutex);
 	  int dummy;
-	  for(int i=0; i<mems.size(); i++){
+	  for(unsigned int i=0; i<mems.size(); i++){
 		  if (mems[i] == cfg->myaddr()) 	// excludes primary node
 			  continue;
 		  handle h(mems[i]);
@@ -370,7 +427,8 @@ rsm::client_invoke(int procno, std::string req, std::string &r)
 		  if (cl != 0) {
 			  tprintf("client_invoke: send invoke to %s\n", mems[i].c_str());
 			  ret = cl->call(rsm_protocol::invoke, procno, myvs, req,
-					  dummy, rpcc::to(10000));
+					  dummy, rpcc::to(6000));
+			  tprintf("client_invoke: invoke returns from %s\n", mems[i].c_str());
 			  if(ret != rsm_protocol::OK){
 				  tprintf("client_invoke: here2, ret=%d\n", ret);
 				  return rsm_client_protocol::BUSY;
@@ -378,12 +436,14 @@ rsm::client_invoke(int procno, std::string req, std::string &r)
 		  }
 	  }
 
+	  tprintf("client_invoke: here3\n");
 	  execute(procno, req, r);
 	  last_myvs = myvs;
 	  myvs.seqno++;
+	  tprintf("client_invoke: here4\n");
   }
   pthread_mutex_lock(&rsm_mutex);
-
+  tprintf("client_invoke: here5\n");
 
   return ret;
 }
@@ -438,10 +498,15 @@ rsm_protocol::transferres &r)
   tprintf("transferreq from %s (%d,%d) vs (%d,%d)\n", src.c_str(), 
 	 last.vid, last.seqno, last_myvs.vid, last_myvs.seqno);
   if (!insync || vid != vid_insync) {
+	  tprintf("transferreq: here1\n");
      return rsm_protocol::BUSY;
   }
-  if (stf && last != last_myvs) 
+  tprintf("transferreq: here2\n");
+  if (stf && last != last_myvs) {
     r.state = stf->marshal_state();
+	tprintf("transferreq: here3\n");
+  }
+
   r.last = last_myvs;
   return ret;
 }
@@ -455,11 +520,33 @@ rsm::transferdonereq(std::string m, unsigned vid, int &)
 {
   int ret = rsm_protocol::OK;
   ScopedLock ml(&rsm_mutex);
+  tprintf("transferdonereq: from %s\n", m.c_str());
   // You fill this in for Lab 7
   // - Return BUSY if I am not insync, or if the slave is not synchronizing
   //   for the same view with me
   // - Remove the slave from the list of unsynchronized backups
   // - Wake up recovery thread if all backups are synchronized
+  if(!insync || vid != vid_insync){
+	  tprintf("transferdonereq: here: %s\n", m.c_str());
+	  return rsm_protocol::BUSY;
+  }
+  std::vector<std::string>::iterator it = backups.begin();
+  for(; it!=backups.end(); it++)
+	  if(*it == m){
+		  tprintf("erase %s from backups vec:\n", m.c_str());
+		  backups.erase(it);
+		  break;
+	  }
+  if(backups.empty()){
+	  tprintf("transferdonereq: here2\n");
+	  pthread_cond_signal(&recovery_cond);	// wake up recovery thread
+  }else{
+	  tprintf("backups vec:\t");
+	  for(unsigned int i=0; i<backups.size(); i++)
+		  printf("%s, ", backups[i].c_str());
+	  printf("\n");
+  }
+
   return ret;
 }
 

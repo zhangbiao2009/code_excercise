@@ -44,7 +44,7 @@ rsm_client::invoke(int proc, std::string req, std::string &rep)
     rpcc *cl = h.safebind();
     if (cl) {
       ret = cl->call(rsm_client_protocol::invoke, proc, req, 
-                     rep, rpcc::to(5000));
+                     rep, rpcc::to(10000));
     }
     VERIFY(pthread_mutex_lock(&rsm_client_mutex)==0);
 
