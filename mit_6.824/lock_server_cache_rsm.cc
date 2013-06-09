@@ -154,12 +154,14 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
   if(!lock_clients[lid]->available){
 	  tprintf("lock_server_cache_rsm::acquire: here2, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
 	  tprintf("waited_clt insert id=%s\n", id.c_str());
-	  waited_clts->insert(id);
-	  //notify revoke thread 
-	  if(rsm->amiprimary()){
-		  tprintf("lock_server_cache_rsm::acquire: add lid=%llu to revoker_queue\n", lid);
-		  revoker_queue.enq(lid);
-	  }
+      if(waited_clts->find(id) == waited_clts->end()){
+          waited_clts->insert(id);
+          //notify revoke thread 
+          if(rsm->amiprimary()){
+              tprintf("lock_server_cache_rsm::acquire: add lid=%llu to revoker_queue\n", lid);
+              revoker_queue.enq(lid);
+          }
+      }
 	  return lock_protocol::RETRY;
   }
 

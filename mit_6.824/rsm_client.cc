@@ -29,6 +29,15 @@ void
 rsm_client::primary_failure()
 {
   // You fill this in for Lab 7
+  // forget about the failed primary, and choose a different replica as the new primary
+  for(unsigned int i=0; i<known_mems.size(); i++){
+      if(known_mems[i] != primary){
+          primary = known_mems[i];
+          //todo: call init_members ??
+          if(init_members())
+              return;
+      }
+  }
 }
 
 rsm_protocol::status

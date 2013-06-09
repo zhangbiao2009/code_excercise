@@ -64,6 +64,8 @@ lock_protocol::status
 lock_client_cache_rsm::acquire(lock_protocol::lockid_t lid)
 {
   lock_protocol::status ret = lock_protocol::OK;
+  struct timeval now;
+  struct timespec next_timeout;
   ScopedLock sl(&lm);
   tprintf("lock_client_cache_rsm::acquire: acquire lock begin: lid=%llu\n", lid);
 begin:
@@ -78,14 +80,25 @@ rpc acquire() may return immediately if no one hold the lock you want
 if the lock is held by another client, rpcc acquire() return RETRY immediately.
 */
 		  xid++;
-		  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
+
+          pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
 		  tprintf("lock_client_cache_rsm::acquire: begin rpc acquire\n");
 		  while((ret = rsmc->call(lock_protocol::acquire, lid, id, xid, r)) == lock_protocol::RETRY){	// waiting for retry msg
 			  tprintf("lock_client_cache_rsm::acquire: returns RETRY\n");
+
 			  pthread_mutex_lock(&lm);
-			  while(!locks[lid].retry)		//retry msg not come yet
-				  pthread_cond_wait(&locks[lid].retry_cond, &lm);
-			  locks[lid].retry = false;		// reset to false
+
+              gettimeofday(&now, NULL);
+              next_timeout.tv_sec = now.tv_sec + 3;
+              next_timeout.tv_nsec = 0;
+
+              int err = 0;
+			  while(!locks[lid].retry){		//retry msg not come yet
+				  err = pthread_cond_timedwait(&locks[lid].retry_cond, &lm, &next_timeout);
+                  if(err == ETIMEDOUT) break;
+                  assert(err == 0);
+              }
+			  locks[lid].retry = false;		// reset to false to receive next retry msg
 			  pthread_mutex_unlock(&lm); //unlock because rpc acquire may block a long time
 		  }
 		  pthread_mutex_lock(&lm);
