@@ -216,6 +216,7 @@ rsm::sync_with_backups()
   int ret = true;
   std::vector<std::string> mems = cfg->get_view(vid_commit);
 
+  backups.clear();      // clear in case old entries because of unfinished state transfer
   tprintf("sync_with_backups: here7\n");
   for (unsigned i  = 0; i < mems.size(); i++) {
     if (mems[i] != cfg->myaddr()){
@@ -232,8 +233,15 @@ rsm::sync_with_backups()
   tprintf("sync_with_backups: here8\n");
   pthread_cond_wait(&recovery_cond, &rsm_mutex);
   tprintf("sync_with_backups: here9\n");
-  if(vid_insync != vid_commit)	//wake up because of a committed viewchange
+
+  tprintf("sync_with_backups: backups vec:\t");
+  for(unsigned int i=0; i<backups.size(); i++)
+      printf("%s, ", backups[i].c_str());
+  printf("\n");
+  if(vid_insync != vid_commit){	//wake up because of a committed viewchange
+      tprintf("sync_with_backups: wake up because of viewchange\n");
 	  ret = false;
+  }
   insync = false;
   return ret;
 }
@@ -530,6 +538,10 @@ rsm::transferdonereq(std::string m, unsigned vid, int &)
 	  tprintf("transferdonereq: here: %s\n", m.c_str());
 	  return rsm_protocol::BUSY;
   }
+  tprintf("before erase, backups vec:\t");
+  for(unsigned int i=0; i<backups.size(); i++)
+      printf("%s, ", backups[i].c_str());
+  printf("\n");
   std::vector<std::string>::iterator it = backups.begin();
   for(; it!=backups.end(); it++)
 	  if(*it == m){
@@ -541,7 +553,7 @@ rsm::transferdonereq(std::string m, unsigned vid, int &)
 	  tprintf("transferdonereq: here2\n");
 	  pthread_cond_signal(&recovery_cond);	// wake up recovery thread
   }else{
-	  tprintf("backups vec:\t");
+	  tprintf("after erase, backups vec:\t");
 	  for(unsigned int i=0; i<backups.size(); i++)
 		  printf("%s, ", backups[i].c_str());
 	  printf("\n");
