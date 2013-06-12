@@ -283,10 +283,11 @@ config::heartbeater()
 paxos_protocol::status
 config::heartbeat(std::string m, unsigned vid, int &r)
 {
+  tprintf("heartbeat from %s(%d) myvid %d, here1\n", m.c_str(), vid, myvid);
   ScopedLock ml(&cfg_mutex);
   int ret = paxos_protocol::ERR;
   r = (int) myvid;
-  tprintf("heartbeat from %s(%d) myvid %d\n", m.c_str(), vid, myvid);
+  tprintf("heartbeat from %s(%d) myvid %d, here2\n", m.c_str(), vid, myvid);
   if (vid == myvid) {
     ret = paxos_protocol::OK;
   } else if (pro->isrunning()) {
@@ -311,13 +312,18 @@ config::doheartbeat(std::string m)
   VERIFY(pthread_mutex_unlock(&cfg_mutex)==0);
   rpcc *cl = h.safebind();
   if (cl) {
+      tprintf("doheartbeater: here1\n");
     ret = cl->call(paxos_protocol::heartbeat, me, vid, r, 
 	           rpcc::to(1000));
-  } 
+      tprintf("doheartbeater: here2\n");
+  } else
+      tprintf("doheartbeater: here3\n");
   VERIFY(pthread_mutex_lock(&cfg_mutex)==0);
   if (ret != paxos_protocol::OK) {
+      tprintf("doheartbeater: here4\n");
     if (ret == rpc_const::atmostonce_failure || 
 	ret == rpc_const::oldsrv_failure) {
+      tprintf("doheartbeater: here5\n");
       mgr.delete_handle(m);
     } else {
       tprintf("doheartbeat: problem with %s (%d) my vid %d his vid %d\n", 

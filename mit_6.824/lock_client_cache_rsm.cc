@@ -103,6 +103,7 @@ if the lock is held by another client, rpcc acquire() return RETRY immediately.
 		  }
 		  pthread_mutex_lock(&lm);
 		  VERIFY (ret == lock_protocol::OK);
+		  tprintf("lock_client_cache_rsm::acquire: rpc acquire ok\n");
 		  locks[lid].stat = LOCKED;
 
 		  break;

@@ -113,12 +113,16 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
              lock_protocol::xid_t xid, int &)
 {
   lock_protocol::status ret = lock_protocol::OK;
+  std::set<std::string>*  waited_clts;
+  std::set<std::string>::iterator it;
 
   ScopedLock ml(&lock_clients_mutex);
   // check if it is a duplicated request
   if(lock_clients.find(lid) != lock_clients.end() && id == lock_clients[lid]->cid 
 		  && xid == lock_clients[lid]->xid){
 	  tprintf("lock_server_cache_rsm::acquire: duplicate request for lock %llu from %s, xid=%llu \n", lid, id.c_str(), xid);
+      tprintf("goto clear_and_notify\n");
+      goto clear_and_notify;
 	  return ret;
   }
 
@@ -131,8 +135,7 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
 	  return ret;
   }
 
-  std::set<std::string>* waited_clts = &lock_clients[lid]->waited_clients;
-  std::set<std::string>::iterator it;
+  waited_clts = &lock_clients[lid]->waited_clients;
   tprintf("waited_clts content:\t");
   for(it=waited_clts->begin(); it!= waited_clts->end(); it++)
 	  printf("%s,", (*it).c_str());
@@ -153,8 +156,8 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
   }
   if(!lock_clients[lid]->available){
 	  tprintf("lock_server_cache_rsm::acquire: here2, lid=%llu, id=%s, xid=%llu\n", lid, id.c_str(), xid);
-	  tprintf("waited_clt insert id=%s\n", id.c_str());
       if(waited_clts->find(id) == waited_clts->end()){
+          tprintf("waited_clt insert id=%s\n", id.c_str());
           waited_clts->insert(id);
           //notify revoke thread 
           if(rsm->amiprimary()){
@@ -171,6 +174,7 @@ int lock_server_cache_rsm::acquire(lock_protocol::lockid_t lid, std::string id,
   lock_clients[lid]->xid = xid;
   lock_clients[lid]->available = false;
 
+clear_and_notify:
   //remove current client from waited clients set (if exists)
   tprintf("waited_clt remove id=%s\n", id.c_str());
   waited_clts->erase(id);

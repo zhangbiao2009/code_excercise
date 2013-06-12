@@ -367,6 +367,7 @@ rsm::commit_change(unsigned vid)
 {
   ScopedLock ml(&rsm_mutex);
   commit_change_wo(vid);
+  breakpoint2();
 }
 
 void 
@@ -435,13 +436,16 @@ rsm::client_invoke(int procno, std::string req, std::string &r)
 		  if (cl != 0) {
 			  tprintf("client_invoke: send invoke to %s\n", mems[i].c_str());
 			  ret = cl->call(rsm_protocol::invoke, procno, myvs, req,
-					  dummy, rpcc::to(6000));
+					  dummy, rpcc::to(1000));
 			  tprintf("client_invoke: invoke returns from %s\n", mems[i].c_str());
 			  if(ret != rsm_protocol::OK){
 				  tprintf("client_invoke: here2, ret=%d\n", ret);
 				  return rsm_client_protocol::BUSY;
 			  }
 		  }
+
+          breakpoint1();
+          partition1();
 	  }
 
 	  tprintf("client_invoke: here3\n");
@@ -484,11 +488,13 @@ rsm::invoke(int proc, viewstamp vs, std::string req, int &dummy)
 
   std::string r;
   pthread_mutex_unlock(&rsm_mutex);		//unlock because acquire() may call rsm::amiprimary(), which will cause deadlock
+  tprintf("rsm::invoke: here3\n");
   execute(proc, req, r);
   pthread_mutex_lock(&rsm_mutex);
   //todo: is it right to update last_myvs and myvs in slave??
   last_myvs = myvs;
   myvs.seqno++;
+  breakpoint1();
 
   return ret;
 }
@@ -710,6 +716,7 @@ void
 rsm::partition1()
 {
   if (dopartition) {
+      tprintf("in partition1\n");
     net_repair_wo(false);
     dopartition = false;
     partitioned = true;
