@@ -3,7 +3,9 @@
 while [ true ]
 do
     echo "running..."
-    ./rsm_tester.pl 16
+    if ! ./rsm_tester.pl 16 ; then
+		exit 1
+	fi
     if grep -q "clear_and_notify" lock_server-*.log ; then
         echo "Found"
         exit 1
