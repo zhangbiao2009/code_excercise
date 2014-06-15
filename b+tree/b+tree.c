@@ -511,6 +511,8 @@ int main()
     char* sep = " ";
     while(fgets(buf,sizeof(buf), stdin) != NULL){
         buf[strlen(buf)-1] = '\0'; //去掉'\n'
+        if(buf[0] == '#')   //注释
+            continue;
         char* token = strtok(buf, sep);
         int flag = 0;
 
