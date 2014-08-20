@@ -59,8 +59,9 @@ void list_print(char* base)
 }
 
 
-void list_del(char* base, char* key, int key_len)
+int list_del(char* base, char* key, int key_len)
 {
+    int ndel = 0;
     btree_node* bp = (btree_node*) base;
     int* i = &bp->cell_list;
     while(*i != 0) {
@@ -68,12 +69,14 @@ void list_del(char* base, char* key, int key_len)
         if(np->key_len == key_len && 
                 memcmp(get_key(np), key, key_len) == 0) // match
         {
+            ndel++;
             arena_free(base, *i);
             *i = np->next;
         }
         else
             i = &np->next;
     }
+    return ndel;
 }
 
 

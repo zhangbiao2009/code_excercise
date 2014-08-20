@@ -1,12 +1,13 @@
 #define PAGE_SIZE 4096
 
-typedef struct page{
+typedef struct{
+    int fd;
     int id;
-    char* page;
+    char* base;
 }page;
 
-page* page_alloc();
-page_free(page* p);
-page* read(page_id);
-page_write(page* p);
+page* page_alloc(int fd, int page_id);
+void page_free(page* p);
+page* page_read(int fd, int page_id);
+void page_write(page* p);
 
