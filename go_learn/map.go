@@ -20,11 +20,20 @@ func main(){
         fmt.Println(v)
     }
     */
+    /*
     m := make(map[interface{}]int)
     m["h"] = 1
     m[2] = 5
     for k,v := range m{
         fmt.Println(k,v)
+    }
+    */
+    set := make(map[string] bool)
+    set["a"] = true
+    set["a"] = false
+    delete(set,"a")
+    for k,v := range set {
+        fmt.Printf("%s %t\n", k, v)
     }
 
 }
