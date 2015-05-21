@@ -48,8 +48,6 @@ function state_add($state)
 	$state_arr[] = $state;
 }
 
-$state_stack = array();
-
 $state_queue = array();
 
 function search($start_state)
@@ -76,7 +74,6 @@ function search($start_state)
 			if(is_target_state($child_state)){
 				echo "found:\n";
 				print_r($child_state);
-				//print_r($state_stack);
 				exit;
 			}
 			if(state_is_ok($child_state) && !state_is_duplicate($child_state)) {
