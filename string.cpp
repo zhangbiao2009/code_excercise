@@ -55,16 +55,20 @@ class String{
 
 int main()
 {
-    String s("hello");
-    cout<<s.refCount()<<endl;
+    String s1("hello");
+    cout<<s1.refCount()<<endl;
     String s2;
-    s2 = s;
-    cout<<"s: "<<s.str()<<endl;
+    s2 = s1;
+    cout<<"s1: "<<s1.str()<<endl;
     cout<<"s2: "<<s2.str()<<endl;
     String s3("hi");
     s2 = s3;
-    cout<<s.refCount()<<endl;
-    cout<<"s: "<<s.str()<<endl;
+    cout<<s1.refCount()<<endl;
+    cout<<"s1: "<<s1.str()<<endl;
+    cout<<"s2: "<<s2.str()<<endl;
+    cout<<"s3: "<<s3.str()<<endl;
+    s2 = "bye";                         // 不需要为C字符串另外提供assignment operator.
+    cout<<"s1: "<<s1.str()<<endl;
     cout<<"s2: "<<s2.str()<<endl;
     cout<<"s3: "<<s3.str()<<endl;
     return 0;
