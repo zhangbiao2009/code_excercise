@@ -34,14 +34,19 @@ class String{
                 delete sp;
             }
         }
-        String& operator=(String tmp)	// exception safe assignment
+        String& operator=(String tmp)	// exception safe assignment，这个利用了上面实现的copy constructor
         {
             cout<<"call ="<<endl;
-            swap(sp, tmp.sp);
+            swap(sp, tmp.sp);   // 如果原来sp有内容，不必费心显式销毁，因为已经交给了tmp，tmp析构时会替你销毁掉
             return *this;
         }
         int refCount(){
             return sp->refCount;
+        }
+        char* str(){
+            if(sp)
+                return sp->p;
+            return NULL;
         }
 
     private:
@@ -54,6 +59,13 @@ int main()
     cout<<s.refCount()<<endl;
     String s2;
     s2 = s;
+    cout<<"s: "<<s.str()<<endl;
+    cout<<"s2: "<<s2.str()<<endl;
+    String s3("hi");
+    s2 = s3;
     cout<<s.refCount()<<endl;
+    cout<<"s: "<<s.str()<<endl;
+    cout<<"s2: "<<s2.str()<<endl;
+    cout<<"s3: "<<s3.str()<<endl;
     return 0;
 }
