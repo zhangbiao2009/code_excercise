@@ -17,8 +17,22 @@ struct StringRep{
     int refCount;
 };
 
+class String;
+
+class CRef{
+    public:
+        CRef(String* ss, int nn)
+            : s(ss), n(nn) { }
+        char operator = (char c);
+        operator char ();
+    private:
+        String* s;
+        int n;
+};
+
 class String{
     public:
+        friend class CRef;
         String():sp(NULL) {}
         String(const char* str)
             :sp(new StringRep(str)) {}
@@ -40,6 +54,16 @@ class String{
             swap(sp, tmp.sp);   // 如果原来sp有内容，不必费心显式销毁，因为已经交给了tmp，tmp析构时会替你销毁掉
             return *this;
         }
+        char operator[](int n) const
+        {
+            cout<<"called 1"<<endl;
+            return sp->p[n];
+        }
+        CRef operator[](int n)
+        {
+            cout<<"called 2"<<endl;
+            return CRef(this, n);
+        }
         int refCount(){
             return sp->refCount;
         }
@@ -52,6 +76,23 @@ class String{
     private:
         StringRep* sp;
 };
+
+char CRef::operator = (char c){
+    cout<< "operator = called" <<endl;
+    if(s->sp->refCount > 1){
+        //clone string
+        StringRep* p = new StringRep(s->sp->p);
+        s->sp->refCount--;
+        s->sp = p;
+    }
+    s->sp->p[n] = c;
+    return s->sp->p[n];
+}
+
+CRef::operator char (){
+    cout<< "operator char() called" <<endl;
+    return s->sp->p[n];
+}
 
 int main()
 {
@@ -67,7 +108,9 @@ int main()
     cout<<"s1: "<<s1.str()<<endl;
     cout<<"s2: "<<s2.str()<<endl;
     cout<<"s3: "<<s3.str()<<endl;
-    s2 = "bye";                         // 不需要为C字符串另外提供assignment operator.
+    //s2 = "bye";                         // 不需要为C字符串另外提供assignment operator.
+    s3[1] = s2[0] = 'c';
+    //cout<<s2[0]<<endl;
     cout<<"s1: "<<s1.str()<<endl;
     cout<<"s2: "<<s2.str()<<endl;
     cout<<"s3: "<<s3.str()<<endl;
