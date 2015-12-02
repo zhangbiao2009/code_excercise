@@ -22,73 +22,73 @@ int Unlink(const string& pathname);
 class CondVar;
 
 class Mutex {
- public:
-  Mutex();
-  ~Mutex();
+    public:
+        Mutex();
+        ~Mutex();
 
-  void Lock();
-  void Unlock();
-  void AssertHeld() { }
+        void Lock();
+        void Unlock();
+        void AssertHeld() { }
 
- private:
-  friend class CondVar;
-  pthread_mutex_t mu_;
+    private:
+        friend class CondVar;
+        pthread_mutex_t mu_;
 
-  // No copying
-  Mutex(const Mutex&);
-  void operator=(const Mutex&);
+        // No copying
+        Mutex(const Mutex&);
+        void operator=(const Mutex&);
 };
 
 class CondVar {
- public:
-  explicit CondVar(Mutex* mu);
-  ~CondVar();
-  void Wait();
-  void Signal();
-  void SignalAll();
- private:
-  pthread_cond_t cv_;
-  Mutex* mu_;
+    public:
+        explicit CondVar(Mutex* mu);
+        ~CondVar();
+        void Wait();
+        void Signal();
+        void SignalAll();
+    private:
+        pthread_cond_t cv_;
+        Mutex* mu_;
 };
 
 class MutexLock {		//scoped lock
- public:
-  explicit MutexLock(Mutex *mu)
-      : mu_(mu)  {
-    this->mu_->Lock();
-  }
-  ~MutexLock() { this->mu_->Unlock(); }
+    public:
+        explicit MutexLock(Mutex *mu)
+            : mu_(mu)  {
+                this->mu_->Lock();
+            }
+        ~MutexLock() { this->mu_->Unlock(); }
 
- private:
-  Mutex *const mu_;
-  // No copying allowed
-  MutexLock(const MutexLock&);
-  void operator=(const MutexLock&);
+    private:
+        Mutex *const mu_;
+        // No copying allowed
+        MutexLock(const MutexLock&);
+        void operator=(const MutexLock&);
 };
 
 
 class Task {
-	public: 
-		virtual ~Task(){}
-		virtual void Process() = 0;
+    public: 
+        virtual ~Task(){}
+        virtual void Process() = 0;
 };
 
 class ThreadPool{
-	public:
-		ThreadPool(int nthreads);
-		~ThreadPool();
-		void AddTask(Task* tp);
-		void Run();
-		void Stop();
+    public:
+        ThreadPool(int nthreads);
+        ~ThreadPool();
+        void AddTask(Task* tp);
+        void Run();
+        void Stop();
 
-	private:
-		static void* thread_func(void* arg);
-		int nthreads_;
-		pthread_t* tids_;
-		CondVar has_tasks_;
-		Mutex m_;
-		std::deque<Task*> task_queue_;
-		bool stop_;
+    private:
+        static void* thread_func(void* arg);
+        int nthreads_;
+        pthread_t* tids_;
+        CondVar has_tasks_;
+        Mutex m_;
+        std::deque<Task*> task_queue_;
+        bool stop_;
 };
 
 typedef void* (*ThreadFunc)(void* arg);
