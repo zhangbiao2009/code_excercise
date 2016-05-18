@@ -1,6 +1,7 @@
 #include <iostream>
 #include <vector>
 #include <stack>
+#include <climits>
 
 using namespace std;
 
@@ -84,9 +85,30 @@ class BST{
             for(int i=0; i<nodes.size(); i++)
                 insert(&root, nodes[i]);
         }
+
         void traverse()
         {
             traverse3(root);
+        }
+
+        bool isBST(Node* np, int* prevp)
+        {
+            if(np == NULL)
+                return true;
+            bool is = isBST(np->left, prevp);
+            if(!is) return false;
+            if(*prevp > np->data)
+                return false;
+            cout<<"prev: "<<*prevp<< ", current: "<<np->data<<endl;
+            *prevp = np->data;
+            return isBST(np->right, prevp);
+
+        }
+
+        bool checkBST()
+        {
+            int prev = INT_MIN;
+            return isBST(root, &prev);
         }
 
 };
@@ -95,6 +117,6 @@ class BST{
 int main()
 {
     BST tree(vector<int>{5,3,9,6,10,4,2,7});
-    tree.traverse();
+    cout<<tree.checkBST()<<endl;
     return 0;
 }
