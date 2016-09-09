@@ -28,10 +28,16 @@ func main(){
         fmt.Println(k,v)
     }
     */
+	/*
     set := make(map[string] bool)
     set["a"] = true
-    set["a"] = false
-    delete(set,"a")
+    set["b"] = false
+	*/
+	set := map[string]bool {
+		"a" : true,
+		"b" : false,
+	}
+    //delete(set,"a")
     for k,v := range set {
         fmt.Printf("%s %t\n", k, v)
     }

@@ -1,0 +1,98 @@
+#!/bin/bash
+
+DEPLOY_DIR="/mnt/deploy/"
+SSH_CMD="/bin/ssh"
+
+sshHost()
+{
+    echo "ssh $1"
+    $SSH_CMD $1
+    exit
+}
+
+showHost()
+{
+    host_file="$DEPLOY_DIR$1/$2/hosts.txt"
+    if [ ! -f $host_file ];then
+        echo "$host_file is not exists"
+        exit
+    fi
+    host_op=()
+    host_arr=()
+    idx=1
+    while read line
+    do
+        host_op+=($idx)
+        IFS=',' read -ra split_arr <<< "$line"
+        if [ ${#split_arr[@]} -gt 1 ];then
+            host_op+=(${split_arr[1]})
+            host_arr+=(${split_arr[0]})
+        else
+            host_op+=($line)
+            host_arr+=($line)
+        fi
+        idx=`expr $idx + 1`
+    done < $host_file
+    if [ ${#host_arr[@]} -eq 0 ];then
+        echo "$host_file is empty"
+        exit
+    fi
+    cmd=(dialog --keep-tite --menu "Select host:" 0 0 0)
+    choices=$("${cmd[@]}" "${host_op[@]}" 2>&1 >/dev/tty)
+    for choice in $choices
+    do
+        sshHost ${host_arr[$choice - 1]}
+    done
+}
+
+showRegion()
+{
+    region_op=()
+    region_arr=()
+    idx=1
+    for dir in $(ls "$DEPLOY_DIR$1/")
+    do
+        if [ -d "$DEPLOY_DIR$1/$dir" ]; then
+            region_op+=($idx)
+            region_op+=($dir)
+            region_arr+=($dir)
+            idx=`expr $idx + 1`
+        fi
+    done
+    if [ ${#region_arr[@]} -eq 0 ];then
+        echo "$1 is empty"        
+        exit
+    fi
+    cmd=(dialog --keep-tite --menu "Select region:" 0 0 0)
+    choices=$("${cmd[@]}" "${region_op[@]}" 2>&1 >/dev/tty)
+    for choice in $choices
+    do
+        showHost $1 ${region_arr[$choice - 1]}
+    done
+}
+
+server_op=()
+server_arr=()
+idx=1
+for dir in $(ls $DEPLOY_DIR)
+do
+    if [ -d "$DEPLOY_DIR$dir" ]; then
+        server_op+=($idx)
+        server_op+=($dir)
+        server_arr+=($dir)
+        idx=`expr $idx + 1`
+    fi
+done
+
+if [ ${#server_arr[@]} -eq 0 ];then
+    exit
+fi
+
+cmd=(dialog --keep-tite --menu "Select server:" 0 0 0)
+choices=$("${cmd[@]}" "${server_op[@]}" 2>&1 >/dev/tty)
+
+for choice in $choices
+do
+    showRegion ${server_arr[$choice - 1]}
+done
+
