@@ -5,12 +5,12 @@ import(
 )
 
 type Adder interface {
-	Add(Adder) Adder
+	add(Adder) Adder
 }
 
 func accumulate(s []Adder, init Adder) Adder{
 	for _, v := range s {
-		init = init.Add(v)
+		init = init.add(v)
 	}
 	return init
 }
@@ -18,13 +18,13 @@ func accumulate(s []Adder, init Adder) Adder{
 
 
 type Int int
-func (t Int) Add(u Adder) Adder {
+func (t Int) add(u Adder) Adder {
 	return t + u.(Int)
 }
 
 
 type String string
-func(s String) Add(u Adder) Adder {
+func(s String) add(u Adder) Adder {
 	return s + u.(String)
 }
 
