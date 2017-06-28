@@ -46,6 +46,7 @@ class BST{
             traverse(np->right, level+1);
         }
 		*/
+		/*
 		void traverse(Node* np, int& idx, int level)
         {
             if(np == NULL)
@@ -57,19 +58,19 @@ class BST{
 			//cout<<np->data<<endl;
             traverse(np->right, idx, level+1);
         }
-		/*
-        void traverse(Node* np, int idx, int level)
+		*/
+        int traverse(Node* np, int idx, int level)
         {
             if(np == NULL)
-                return;
-            traverse(np->left, idx, level+1);
+                return idx;
+            idx = traverse(np->left, idx, level+1);
 			np->level = level;
 			np->idx = idx;
 			idx++;
 			//cout<<np->data<<endl;
-            traverse(np->right, idx, level+1);
+            idx = traverse(np->right, idx, level+1);
+			return idx;
         }
-		*/
 
 		void level_traverse(Node* root)
 		{
@@ -110,8 +111,8 @@ class BST{
 
 		void print()
 		{
-			int idx = 0;
-			traverse(root, idx, 0);
+			//int idx = 0;
+			traverse(root, 0, 0);
 			level_traverse(root);
 		}
 
