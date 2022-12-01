@@ -105,6 +105,8 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode){
 		}
 		node.nkeys = nLeft
 		rightSibling.nkeys = nRight
+		rightSibling.prev = node
+		node.next = rightSibling
 		return rightSibling.GetLeftMostKey(), rightSibling
 	}
 	return 0, nil
@@ -112,15 +114,25 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode){
 
 func (node *LeafNode) PrintDotGraph(w io.Writer) {
 	fmt.Fprintf(w, "node%d [label = \"", node.id)
-	fmt.Fprintf(w, "<f0> %d", node.keys[0])	// for the keys[0]
-	//fmt.Fprintf(w, "|<f1> val:%d", node.vals[0])	// for the vals[0]
-	fmt.Fprintf(w, "|<f1> v")	// for the vals[0]
-	for i:=1; i<node.nkeys; i++ {
-		fmt.Fprintf(w, "|<f%d> %d", 2*i, node.keys[i])	// for the keys[i]
+	fmt.Fprintf(w, "<f0> ")	// for prev ptr
+	for i:=0; i<node.nkeys; i++ {
+		fmt.Fprintf(w, "|<f%d> %d", 2*i+1, node.keys[i])	// for the keys[i]
 		//fmt.Fprintf(w, "|<f%d> val:%d", 2*i+1, node.vals[i])	// for the vals[i]
-		fmt.Fprintf(w, "|<f%d> v", 2*i+1)	// for the vals[i]
+		fmt.Fprintf(w, "|<f%d> v", 2*i+2)	// for the vals[i]
 	}
+	nextPtrFid := 2*node.nkeys+1
+	fmt.Fprintf(w, "|<f%d> ", nextPtrFid)	// for next ptr
 	fmt.Fprintln(w, "\"];")
+	// 打印这两个指针会导致图形layout不好看，没找到好办法前暂时不打印
+	/*
+	if node.prev != nil {
+		fid := 2*node.prev.nkeys+1
+		fmt.Fprintf(w, "\"node%d\":f0 -> \"node%d\":f%d;\n", node.id, node.prev.getNodeId(), fid) // for prev ptr edge
+	}
+	if node.next != nil {
+		fmt.Fprintf(w, "\"node%d\":f%d -> \"node%d\":f0;\n", node.id, nextPtrFid, node.next.getNodeId()) // for next ptr edge
+	}
+	*/
 }
 
 type InternalNode struct {
