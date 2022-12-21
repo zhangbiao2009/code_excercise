@@ -19,6 +19,9 @@ type BTreeNode interface {
 	getNodeId() int
 	getNKeys() int
 	needSplit() bool
+	stealFromRight(rightp BTreeNode, parentKey int) (midKey int)
+	stealFromLeft(leftp BTreeNode, parentKey int) (midKey int)
+	mergeWithRight(rightp BTreeNode, parentKey int)
 	PrintDotGraph(w io.Writer)
 }
 
@@ -173,6 +176,37 @@ func (node *LeafNode) appendMaxKeyVal(key, val int) {
 	node.nkeys++
 }
 
+func (node *LeafNode) stealFromLeft(leftp BTreeNode, parentKey int) (midKey int) {
+	left := leftp.(*LeafNode)
+	key, val := left.removeMaxKeyVal()
+	node.insertKV(key, val) // TODO: 是不是专门写个函数会好一点，不调用insertKv；
+	return key              // note: key is exactly the min key in curr
+}
+
+func (node *LeafNode) stealFromRight(rightp BTreeNode, parentKey int) (midKey int) {
+	right := rightp.(*LeafNode)
+	key, val := right.removeMinKeyVal()
+	node.appendMaxKeyVal(key, val)
+	return right.getLeftMostKey()
+}
+
+func (node *LeafNode) mergeWithRight(rightp BTreeNode, parentKey int) {
+	//merge的时候，把在右边的key和val都copy过来，
+	left := node
+	right := rightp.(*LeafNode)
+	j := left.nkeys
+	for i := 0; i < right.nkeys; i++ {
+		left.keys[j] = right.keys[i]
+		left.vals[j] = right.vals[i]
+		j++
+	}
+	left.nkeys += right.nkeys
+	left.next = right.next
+	if right.next != nil {
+		right.next.prev = left
+	}
+}
+
 func (node *LeafNode) PrintDotGraph(w io.Writer) {
 	fmt.Fprintf(w, "node%d [label = \"", node.id)
 	fmt.Fprintf(w, "<f0> ") // for prev ptr
@@ -245,77 +279,73 @@ func (node *InternalNode) delete(key int) {
 	if cp.getNKeys() < minKeys { // number of keys too small after deletion
 		// try to steal from siblings
 		// right sibling exists and can steal
-		// TODO: 这些判断和逻辑有待合并
-		if cp.isLeafNode() {
-			if i+1 <= node.nkeys && node.ptrs[i+1].getNKeys() > minKeys {
-				midKey := stealFromRightLeaf(node.ptrs[i], node.ptrs[i+1])
-				node.keys[i] = midKey
-				return
-			}
-			// left sibling exists and can steal
-			if i-1 >= 0 && node.ptrs[i-1].getNKeys() > minKeys {
-				midKey := stealFromLeftLeaf(node.ptrs[i], node.ptrs[i-1])
-				node.keys[i-1] = midKey
-				return
-			}
-			if i+1 <= node.nkeys { // right sibling exists
-				mergeWithRightLeaf(node.ptrs[i], node.ptrs[i+1])
-				//因为right sibling不应该存在了，所以parent对应的key和ptr也删除；
-				node.delKeyandPtrByIndex(i, i+1)
-				return
-			}
+		if i+1 <= node.nkeys && node.ptrs[i+1].getNKeys() > minKeys {
+			midKey := node.ptrs[i].stealFromRight(node.ptrs[i+1], node.keys[i])
+			node.keys[i] = midKey
+			return
+		}
+		// left sibling exists and can steal
+		if i-1 >= 0 && node.ptrs[i-1].getNKeys() > minKeys {
+			midKey := node.ptrs[i].stealFromLeft(node.ptrs[i-1], node.keys[i-1])
+			node.keys[i-1] = midKey
+			return
+		}
 
-			if i-1 >= 0 { // left sibling exists
-				// 合并到左边的sibling去
-				mergeWithRightLeaf(node.ptrs[i-1], node.ptrs[i])
-				node.delKeyandPtrByIndex(i-1, i)
-			}
-		} else { // 非叶子节点合并方式和叶子节点不同
-			if i+1 <= node.nkeys && node.ptrs[i+1].getNKeys() > minKeys {
-				midKey := stealFromRightInternal(node.ptrs[i], node.ptrs[i+1], node.keys[i])
-				node.keys[i] = midKey
-				return
-			}
-			// left sibling exists and can steal
-			if i-1 >= 0 && node.ptrs[i-1].getNKeys() > minKeys {
-				midKey := stealFromLeftInternal(node.ptrs[i], node.ptrs[i-1], node.keys[i-1])
-				node.keys[i-1] = midKey
-				return
-			}
+		// if steal not possible, try to merge
+		if i+1 <= node.nkeys { // right sibling exists
+			node.ptrs[i].mergeWithRight(node.ptrs[i+1], node.keys[i])
+			//因为right sibling不应该存在了，所以parent对应的key和ptr也删除；
+			node.delKeyandPtrByIndex(i, i+1)
+			return
+		}
 
-			if i+1 <= node.nkeys { // right sibling exists
-				mergeWithRightInternal(node.ptrs[i], node.ptrs[i+1], node.keys[i])
-				//因为right sibling不应该存在了，所以parent对应的key和ptr也删除；
-				node.delKeyandPtrByIndex(i, i+1)
-				return
-			}
-
-			if i-1 >= 0 { // left sibling exists
-				// 合并到左边的sibling去
-				mergeWithRightInternal(node.ptrs[i-1], node.ptrs[i], node.keys[i-1])
-				node.delKeyandPtrByIndex(i-1, i)
-			}
+		if i-1 >= 0 { // left sibling exists
+			// 合并到左边的sibling去
+			node.ptrs[i-1].mergeWithRight(node.ptrs[i], node.keys[i-1])
+			node.delKeyandPtrByIndex(i-1, i)
+			return
 		}
 	}
 }
 
-func stealFromRightLeaf(currp, rightp BTreeNode) (midKey int) {
-	curr := currp.(*LeafNode)
-	right := rightp.(*LeafNode)
-	key, val := right.removeMinKeyVal()
-	curr.appendMaxKeyVal(key, val)
-	return right.getLeftMostKey()
+
+
+func (node *InternalNode) stealFromLeft(leftp BTreeNode, parentKey int) (midKey int) {
+	/* 要拿到key来自于父节点，还要从left sibling那最大的一个指针过来，作为这边最小的指针，
+	然后left sibling的最大的key变为父节点的key；
+	*/
+	left := leftp.(*InternalNode)
+	key, ptr := left.removeMaxKeyAndPtr()
+	node.appendMinKeyAndPtr(parentKey, ptr)
+	return key
 }
 
-func stealFromRightInternal(currp, rightp BTreeNode, parentKey int) (midKey int) {
+func (node *InternalNode) stealFromRight(rightp BTreeNode, parentKey int) (midKey int) {
 	/* 要拿到key来自于父节点，还要从right sibling那最小的一个指针过来，作为这边最大的指针，
 	然后right sibling最小的key变为父节点的key；
 	*/
-	curr := currp.(*InternalNode)
 	right := rightp.(*InternalNode)
 	key, ptr := right.removeMinKeyAndPtr()
-	curr.appendMaxKeyAndPtr(parentKey, ptr)
+	node.appendMaxKeyAndPtr(parentKey, ptr)
 	return key
+}
+
+func (node *InternalNode) mergeWithRight(rightp BTreeNode, parentKey int) {
+	/* 和叶子节点的merge不同，需要先把parent的key copy过来，
+	然后copy right sibling的key和ptr；然后删除parent的key和它相邻的右边的指针
+	*/
+	left := node
+	right := rightp.(*InternalNode)
+	left.keys[left.nkeys] = parentKey
+	left.nkeys++
+	j := left.nkeys
+	for i := 0; i < right.nkeys; i++ {
+		left.keys[j] = right.keys[i]
+		left.ptrs[j] = right.ptrs[i]
+		j++
+	}
+	left.ptrs[j] = right.ptrs[right.nkeys]
+	left.nkeys += right.nkeys
 }
 
 func (node *InternalNode) removeMinKeyAndPtr() (key int, ptr BTreeNode) {
@@ -341,60 +371,6 @@ func (node *InternalNode) delKeyandPtrByIndex(keyStart, ptrStart int) {
 	}
 	node.ptrs[node.nkeys] = nil
 	node.nkeys--
-}
-
-func stealFromLeftLeaf(currp, leftp BTreeNode) (midKey int) {
-	curr := currp.(*LeafNode)
-	left := leftp.(*LeafNode)
-	key, val := left.removeMaxKeyVal()
-	curr.insertKV(key, val) // TODO: 是不是专门写个函数会好一点，不调用insertKv；
-	return key              // note: key is exactly the min key in curr
-}
-
-func stealFromLeftInternal(currp, leftp BTreeNode, parentKey int) (midKey int) {
-	/* 要拿到key来自于父节点，还要从left sibling那最大的一个指针过来，作为这边最小的指针，
-	然后left sibling的最大的key变为父节点的key；
-	*/
-	curr := currp.(*InternalNode)
-	left := leftp.(*InternalNode)
-	key, ptr := left.removeMaxKeyAndPtr()
-	curr.appendMinKeyAndPtr(parentKey, ptr)
-	return key
-}
-
-func mergeWithRightLeaf(leftp, rightp BTreeNode) {
-	//merge的时候，把在右边的key和val都copy过来，
-	left := leftp.(*LeafNode)
-	right := rightp.(*LeafNode)
-	j := left.nkeys
-	for i := 0; i < right.nkeys; i++ {
-		left.keys[j] = right.keys[i]
-		left.vals[j] = right.vals[i]
-		j++
-	}
-	left.nkeys += right.nkeys
-	left.next = right.next
-	if right.next != nil {
-		right.next.prev = left
-	}
-}
-
-func mergeWithRightInternal(leftp, rightp BTreeNode, parentKey int) {
-	/* 和叶子节点的merge不同，需要先把parent的key copy过来，
-	然后copy right sibling的key和ptr；然后删除parent的key和它相邻的右边的指针
-	*/
-	left := leftp.(*InternalNode)
-	right := rightp.(*InternalNode)
-	left.keys[left.nkeys] = parentKey
-	left.nkeys++
-	j := left.nkeys
-	for i := 0; i < right.nkeys; i++ {
-		left.keys[j] = right.keys[i]
-		left.ptrs[j] = right.ptrs[i]
-		j++
-	}
-	left.ptrs[j] = right.ptrs[right.nkeys]
-	left.nkeys += right.nkeys
 }
 
 func (node *InternalNode) removeMaxKeyAndPtr() (key int, ptr BTreeNode) {

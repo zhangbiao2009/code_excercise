@@ -20,9 +20,6 @@ func main() {
 	bt.Delete(274)
 	bt.Delete(162)
 	/*
-		bt.Delete(425)
-		bt.Delete(694)
-		bt.Delete(540)
 		bt.Insert(6, 6)
 		bt.Insert(3, 3)
 		bt.Insert(19, 19)
