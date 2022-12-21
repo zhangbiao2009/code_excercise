@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"math/rand"
 	"os"
 
@@ -11,14 +12,17 @@ import (
 func main() {
 	bt := btree.NewBTree(5)
 	fileNumber := 0
+	m := make(map[int]struct{})
 	for i := 0; i < 17; i++ {
 		num := rand.Intn(1000)
+		m[num] = struct{}{}
 		bt.Insert(num, num)
 		fileNumber++
 		//name := fmt.Sprintf("btree%d.dot", fileNumber)
 	}
-	bt.Delete(274)
-	bt.Delete(162)
+	for num := range m {
+		bt.Delete(num)
+	}
 	/*
 		bt.Insert(6, 6)
 		bt.Insert(3, 3)

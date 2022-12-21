@@ -15,6 +15,7 @@ type BTreeNode interface {
 	insertKV(key, val int) (keyPromoted int, newRightSibling BTreeNode)
 	getLeftMostKey() int
 	delete(key int)
+	find(key int) (int, bool)
 	degree() int
 	getNodeId() int
 	getNKeys() int
@@ -78,6 +79,18 @@ func (node *LeafNode) print() {
 		fmt.Printf("%d ", node.vals[i])
 	}
 	fmt.Println()
+}
+
+func (node *LeafNode) find(key int) (int, bool) {
+	for i := 0; i < node.nkeys; i++ {
+		if node.keys[i] == key { // key exists
+			return node.vals[i], true
+		}
+		if key < node.keys[i] {
+			break
+		}
+	}
+	return 0, false
 }
 
 // if split return right sibling else return null
@@ -265,6 +278,17 @@ func (node *InternalNode) getLeftMostKey() int {
 	return node.keys[0]
 }
 
+func (node *InternalNode) find(key int) (int, bool) {
+	i := 0
+	for ; i < node.nkeys; i++ {
+		if key < node.keys[i] {
+			break
+		}
+	}
+	// assert key >= node.keys[i]
+	return node.ptrs[i].find(key)
+}
+
 func (node *InternalNode) delete(key int) {
 	i := 0
 	for ; i < node.nkeys; i++ {
@@ -307,8 +331,6 @@ func (node *InternalNode) delete(key int) {
 		}
 	}
 }
-
-
 
 func (node *InternalNode) stealFromLeft(leftp BTreeNode, parentKey int) (midKey int) {
 	/* 要拿到key来自于父节点，还要从left sibling那最大的一个指针过来，作为这边最小的指针，
@@ -484,8 +506,8 @@ func (tree *BTree) FindRange(lowKey, highKey int) []int {
 	return nil
 }
 
-func (tree *BTree) Find(key int) bool {
-	return false
+func (tree *BTree) Find(key int) (int, bool) {
+	return tree.root.find(key)
 }
 
 func (bt *BTree) Insert(key, val int) {

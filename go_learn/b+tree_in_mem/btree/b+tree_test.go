@@ -3,9 +3,11 @@ package btree
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"os"
 	"testing"
 )
+
 func TestInsertLeafNodeNoSplit(t *testing.T) {
 	curr := NewLeafNode(5)
 	curr.insertKV(6, 6)
@@ -57,4 +59,38 @@ func TestBTreeInsert(t *testing.T) {
 	bt.Insert(9, 9)
 	writer := bufio.NewWriter(os.Stdout)
 	bt.PrintDotGraph(writer)
+}
+
+func getUniqueInts(n int) []int {
+	m := make(map[int]struct{})
+	for {
+		num := rand.Intn(100 * n)
+		m[num] = struct{}{}
+		if len(m) >= n {
+			break
+		}
+	}
+	res := make([]int, len(m))
+	cnt := 0
+	for num := range m {
+		res[cnt] = num
+		cnt++
+	}
+	return res
+}
+
+func TestBTreeFind(t *testing.T) {
+	intSlice := getUniqueInts(17)
+	bt := NewBTree(5)
+	for _, num := range intSlice {
+		bt.Insert(num, num*2)
+	}
+	for i := 0; i < 5; i++ {
+		ri := rand.Intn(len(intSlice))
+		randKey := intSlice[ri]
+		val, ok := bt.Find(randKey)
+		if !ok || val != randKey*2 {
+			t.Error("failed")
+		}
+	}
 }
