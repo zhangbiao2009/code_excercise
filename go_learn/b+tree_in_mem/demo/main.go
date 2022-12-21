@@ -10,16 +10,24 @@ import (
 
 func main() {
 	bt := btree.NewBTree(5)
-	for i:=0; i<30; i++ {
+	for i := 0; i < 17; i++ {
 		num := rand.Intn(1000)
 		bt.Insert(num, num)
 	}
+	bt.Delete(274)
+	bt.Delete(162)
 	/*
-	bt.Insert(6, 6)
-	bt.Insert(3, 3)
-	bt.Insert(19, 19)
-	bt.Insert(7, 7)
-	bt.Insert(10, 10)
+		bt.Delete(425)
+		bt.Delete(694)
+		bt.Delete(540)
+		bt.Insert(6, 6)
+		bt.Insert(3, 3)
+		bt.Insert(19, 19)
+		bt.Insert(7, 7)
+		bt.Insert(10, 10)
+		bt.Insert(5, 5)
+		bt.Delete(5)
+		bt.Delete(3)
 	*/
 	bw := bufio.NewWriter(os.Stdout)
 	bt.PrintDotGraph(bw)
