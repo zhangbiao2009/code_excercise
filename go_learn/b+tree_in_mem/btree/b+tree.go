@@ -1,8 +1,11 @@
 package btree
 
 import (
+	"bufio"
 	"fmt"
 	"io"
+	"log"
+	"os"
 )
 
 var id int
@@ -111,6 +114,10 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode) {
 		node.nkeys = nLeft
 		rightSibling.nkeys = nRight
 		rightSibling.prev = node
+		rightSibling.next = node.next
+		if node.next != nil {
+			node.next.prev = rightSibling
+		}
 		node.next = rightSibling
 		return rightSibling.getLeftMostKey(), rightSibling
 	}
@@ -180,7 +187,7 @@ func (node *LeafNode) PrintDotGraph(w io.Writer) {
 	// 打印这两个指针会导致图形layout不好看，没找到好办法前暂时不打印
 	/*
 		if node.prev != nil {
-			fid := 2*node.prev.nkeys+1
+			fid := 2*node.prev.nkeys + 1
 			fmt.Fprintf(w, "\"node%d\":f0 -> \"node%d\":f%d;\n", node.id, node.prev.getNodeId(), fid) // for prev ptr edge
 		}
 		if node.next != nil {
@@ -534,4 +541,15 @@ func (bt *BTree) PrintDotGraph(w io.Writer) {
 	fmt.Fprintln(w, "node [shape = record,height=.1];")
 	bt.root.PrintDotGraph(w)
 	fmt.Fprintln(w, "}")
+}
+
+func (bt *BTree) PrintDotGraph2(fileName string) {
+	f, err := os.Create(fileName)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bw := bufio.NewWriter(f)
+	bt.PrintDotGraph(bw)
+	bw.Flush()
+	f.Close()
 }

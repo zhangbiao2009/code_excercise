@@ -10,9 +10,12 @@ import (
 
 func main() {
 	bt := btree.NewBTree(5)
+	fileNumber := 0
 	for i := 0; i < 17; i++ {
 		num := rand.Intn(1000)
 		bt.Insert(num, num)
+		fileNumber++
+		//name := fmt.Sprintf("btree%d.dot", fileNumber)
 	}
 	bt.Delete(274)
 	bt.Delete(162)
