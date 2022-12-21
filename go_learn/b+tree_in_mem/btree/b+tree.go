@@ -8,9 +8,9 @@ import (
 var id int
 
 type BTreeNode interface {
-	IsLeafNode() bool
+	isLeafNode() bool
 	insertKV(key, val int) (keyPromoted int, newRightSibling BTreeNode)
-	GetLeftMostKey() int
+	getLeftMostKey() int
 	delete(key int)
 	degree() int
 	getNodeId() int
@@ -37,7 +37,7 @@ func NewLeafNode(degree int) *LeafNode {
 	}
 }
 
-func (node *LeafNode) IsLeafNode() bool {
+func (node *LeafNode) isLeafNode() bool {
 	return true
 }
 
@@ -49,7 +49,7 @@ func (node *LeafNode) needSplit() bool {
 	return node.nkeys == len(node.keys)
 }
 
-func (node *LeafNode) GetLeftMostKey() int {
+func (node *LeafNode) getLeftMostKey() int {
 	return node.keys[0]
 }
 
@@ -112,7 +112,7 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode) {
 		rightSibling.nkeys = nRight
 		rightSibling.prev = node
 		node.next = rightSibling
-		return rightSibling.GetLeftMostKey(), rightSibling
+		return rightSibling.getLeftMostKey(), rightSibling
 	}
 	return 0, nil
 }
@@ -212,7 +212,7 @@ func (node *InternalNode) getNKeys() int {
 	return node.nkeys
 }
 
-func (node *InternalNode) IsLeafNode() bool {
+func (node *InternalNode) isLeafNode() bool {
 	return false
 }
 
@@ -220,7 +220,7 @@ func (node *InternalNode) needSplit() bool {
 	return node.nkeys == len(node.keys)
 }
 
-func (node *InternalNode) GetLeftMostKey() int {
+func (node *InternalNode) getLeftMostKey() int {
 	return node.keys[0]
 }
 
@@ -239,7 +239,7 @@ func (node *InternalNode) delete(key int) {
 		// try to steal from siblings
 		// right sibling exists and can steal
 		// TODO: 这些判断和逻辑有待合并
-		if cp.IsLeafNode() {
+		if cp.isLeafNode() {
 			if i+1 <= node.nkeys && node.ptrs[i+1].getNKeys() > minKeys {
 				midKey := stealFromRightLeaf(node.ptrs[i], node.ptrs[i+1])
 				node.keys[i] = midKey
@@ -297,7 +297,7 @@ func stealFromRightLeaf(currp, rightp BTreeNode) (midKey int) {
 	right := rightp.(*LeafNode)
 	key, val := right.removeMinKeyVal()
 	curr.appendMaxKeyVal(key, val)
-	return right.GetLeftMostKey()
+	return right.getLeftMostKey()
 }
 
 func stealFromRightInternal(currp, rightp BTreeNode, parentKey int) (midKey int) {
@@ -521,7 +521,7 @@ func (bt *BTree) Insert(key, val int) {
 func (bt *BTree) Delete(key int) {
 	bt.root.delete(key)
 	// 删除后，有可能root只剩下一个指针，没有key了，这时候需要去掉多余的root空节点
-	if !bt.root.IsLeafNode() {
+	if !bt.root.isLeafNode() {
 		root := bt.root.(*InternalNode)
 		if root.nkeys == 0 {
 			bt.root = root.ptrs[0]
