@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	bt := btree.NewBTree(5)
+	bt := btree.NewBTree[int](5)
 	fileNumber := 0
 	m := make(map[int]struct{})
 	for i := 0; i < 17; i++ {

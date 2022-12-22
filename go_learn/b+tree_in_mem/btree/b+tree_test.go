@@ -10,14 +10,14 @@ import (
 )
 
 func TestInsertLeafNodeNoSplit(t *testing.T) {
-	curr := NewLeafNode(5)
+	curr := NewLeafNode[int](5)
 	curr.insertKV(6, 6)
 	curr.insertKV(3, 3)
 	curr.insertKV(9, 9)
 	curr.print()
 }
 func TestInsertLeafNodeSplit(t *testing.T) {
-	curr := NewLeafNode(5)
+	curr := NewLeafNode[int](5)
 	pkey, right := curr.insertKV(6, 6)
 	pkey, right = curr.insertKV(3, 3)
 	pkey, right = curr.insertKV(9, 9)
@@ -30,7 +30,7 @@ func TestInsertLeafNodeSplit(t *testing.T) {
 }
 
 func TestInsertLeafNodeSplit2(t *testing.T) {
-	curr := NewLeafNode(5)
+	curr := NewLeafNode[int](5)
 	pkey, right := curr.insertKV(6, 6)
 	pkey, right = curr.insertKV(3, 3)
 	pkey, right = curr.insertKV(9, 9)
@@ -42,7 +42,7 @@ func TestInsertLeafNodeSplit2(t *testing.T) {
 }
 
 func TestInsertLeafNodeSplit3(t *testing.T) {
-	curr := NewLeafNode(5)
+	curr := NewLeafNode[int](5)
 	pkey, right := curr.insertKV(6, 6)
 	pkey, right = curr.insertKV(3, 3)
 	pkey, right = curr.insertKV(9, 9)
@@ -54,7 +54,7 @@ func TestInsertLeafNodeSplit3(t *testing.T) {
 }
 
 func TestBTreeInsert(t *testing.T) {
-	bt := NewBTree(3)
+	bt := NewBTree[int](3)
 	bt.Insert(6, 6)
 	bt.Insert(3, 3)
 	bt.Insert(9, 9)
@@ -84,7 +84,7 @@ func getUniqueInts(n int) []int {
 
 func TestBTreeFind(t *testing.T) {
 	intSlice := getUniqueInts(17)
-	bt := NewBTree(5)
+	bt := NewBTree[int](5)
 	for _, num := range intSlice {
 		bt.Insert(num, num*2)
 	}
@@ -100,7 +100,7 @@ func TestBTreeFind(t *testing.T) {
 
 func TestBTreeFindRange(t *testing.T) {
 	intSlice := getUniqueInts(37)
-	bt := NewBTree(5)
+	bt := NewBTree[int](5)
 	for _, num := range intSlice {
 		bt.Insert(num, num*2)
 	}
@@ -134,7 +134,7 @@ func TestBTreeFindRange(t *testing.T) {
 
 func TestBTreeFindRange2(t *testing.T) {
 	intSlice := getUniqueInts(39)
-	bt := NewBTree(5)
+	bt := NewBTree[int](5)
 	for _, num := range intSlice {
 		bt.Insert(num, num*2)
 	}
@@ -172,7 +172,7 @@ func TestBTreeFindRange2(t *testing.T) {
 
 func TestBTreeFindRange3(t *testing.T) {
 	intSlice := getUniqueInts(39)
-	bt := NewBTree(5)
+	bt := NewBTree[int](5)
 	for _, num := range intSlice {
 		bt.Insert(num, num*2)
 	}
@@ -209,7 +209,7 @@ func TestBTreeFindRange3(t *testing.T) {
 
 func TestBTreeFindRange4(t *testing.T) {
 	intSlice := getUniqueInts(39)
-	bt := NewBTree(5)
+	bt := NewBTree[int](5)
 	for _, num := range intSlice {
 		bt.Insert(num, num*2)
 	}

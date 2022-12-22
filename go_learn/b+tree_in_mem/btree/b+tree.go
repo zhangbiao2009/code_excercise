@@ -6,78 +6,84 @@ import (
 	"io"
 	"log"
 	"os"
+
+	"golang.org/x/exp/constraints"
 )
 
 var id int
 
-type BTreeNode interface {	// 为统一处理leaf node和internal node建立的抽象
+type BTreeNode[K Key] interface { // 为统一处理leaf node和internal node建立的抽象
 	isLeafNode() bool
-	insertKV(key, val int) (keyPromoted int, newRightSibling BTreeNode)
-	getLeftMostKey() int
-	delete(key int)
-	find(key int) (theNode *LeafNode, index int)
-	findMinLeaf() *LeafNode
+	insertKV(key K, val int) (keyPromoted K, newRightSibling BTreeNode[K])
+	getLeftMostKey() K
+	delete(key K)
+	find(key K) (theNode *LeafNode[K], index int)
+	findMinLeaf() *LeafNode[K]
 	degree() int
 	getNodeId() int
 	getNKeys() int
 	needSplit() bool
-	stealFromRight(rightp BTreeNode, parentKey int) (midKey int)
-	stealFromLeft(leftp BTreeNode, parentKey int) (midKey int)
-	mergeWithRight(rightp BTreeNode, parentKey int)
+	stealFromRight(rightp BTreeNode[K], parentKey K) (midKey K)
+	stealFromLeft(leftp BTreeNode[K], parentKey K) (midKey K)
+	mergeWithRight(rightp BTreeNode[K], parentKey K)
 	PrintDotGraph(w io.Writer)
 }
 
-type LeafNode struct {
+type Key interface {
+	constraints.Integer | ~string
+}
+
+type LeafNode[K Key] struct {
 	id    int
-	prev  *LeafNode
-	next  *LeafNode
+	prev  *LeafNode[K]
+	next  *LeafNode[K]
 	nkeys int
-	keys  []int
+	keys  []K
 	vals  []int
 }
 
-func NewLeafNode(degree int) *LeafNode {
+func NewLeafNode[K Key](degree int) *LeafNode[K] {
 	id++
-	return &LeafNode{
+	return &LeafNode[K]{
 		id:   id,
-		keys: make([]int, degree), // 多分配一个，split的时候可以先插入再split，简化算法
+		keys: make([]K, degree), // 多分配一个，split的时候可以先插入再split，简化算法
 		vals: make([]int, degree),
 	}
 }
 
-func (node *LeafNode) isLeafNode() bool {
+func (node *LeafNode[K]) isLeafNode() bool {
 	return true
 }
 
-func (node *LeafNode) degree() int {
+func (node *LeafNode[K]) degree() int {
 	return len(node.keys)
 }
 
-func (node *LeafNode) needSplit() bool {
+func (node *LeafNode[K]) needSplit() bool {
 	return node.nkeys == len(node.keys)
 }
 
-func (node *LeafNode) getLeftMostKey() int {
+func (node *LeafNode[K]) getLeftMostKey() K {
 	return node.keys[0]
 }
 
-func (node *LeafNode) getNodeId() int {
+func (node *LeafNode[K]) getNodeId() int {
 	return node.id
 }
 
-func (node *LeafNode) getNKeys() int {
+func (node *LeafNode[K]) getNKeys() int {
 	return node.nkeys
 }
 
-func (node *LeafNode) findMinLeaf() *LeafNode {
+func (node *LeafNode[K]) findMinLeaf() *LeafNode[K] {
 	return node
 }
 
-func (node *LeafNode) print() {
+func (node *LeafNode[K]) print() {
 	fmt.Printf("node id: %d\n", node.id)
 	fmt.Println("keys")
 	for i := 0; i < node.nkeys; i++ {
-		fmt.Printf("%d ", node.keys[i])
+		fmt.Printf("%v ", node.keys[i])
 	}
 	fmt.Println("values")
 	for i := 0; i < node.nkeys; i++ {
@@ -86,7 +92,7 @@ func (node *LeafNode) print() {
 	fmt.Println()
 }
 
-func (node *LeafNode) find(key int) (*LeafNode, int) {
+func (node *LeafNode[K]) find(key K) (*LeafNode[K], int) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key <= node.keys[i] {
@@ -102,13 +108,13 @@ func (node *LeafNode) find(key int) (*LeafNode, int) {
 }
 
 // if split return right sibling else return null
-func (node *LeafNode) insertKV(key, val int) (int, BTreeNode) {
+func (node *LeafNode[K]) insertKV(key K, val int) (K, BTreeNode[K]) {
 	deg := node.degree()
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if node.keys[i] == key { // key already exists, update value only
 			node.vals[i] = val
-			return 0, nil
+			return *new(K), nil
 		}
 		if key < node.keys[i] {
 			break
@@ -124,14 +130,14 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode) {
 	node.vals[i] = val
 	node.nkeys++
 	if node.needSplit() {
-		rightSibling := NewLeafNode(deg)
+		rightSibling := NewLeafNode[K](deg)
 		nLeft := deg / 2
 		nRight := deg - nLeft
 		l := node.nkeys - 1
 		for r := nRight - 1; r >= 0; r-- {
 			rightSibling.keys[r] = node.keys[l]
 			rightSibling.vals[r] = node.vals[l]
-			node.keys[l] = 0
+			node.keys[l] = *new(K)
 			node.vals[l] = 0
 			l--
 		}
@@ -145,10 +151,10 @@ func (node *LeafNode) insertKV(key, val int) (int, BTreeNode) {
 		node.next = rightSibling
 		return rightSibling.getLeftMostKey(), rightSibling
 	}
-	return 0, nil
+	return *new(K), nil
 }
 
-func (node *LeafNode) delete(key int) {
+func (node *LeafNode[K]) delete(key K) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key < node.keys[i] {
@@ -165,56 +171,56 @@ func (node *LeafNode) delete(key int) {
 	node.delKeyValByIndex(i)
 }
 
-func (node *LeafNode) delKeyValByIndex(i int) {
+func (node *LeafNode[K]) delKeyValByIndex(i int) {
 	for j := i + 1; j < node.nkeys; j++ {
 		node.keys[j-1] = node.keys[j]
 		node.vals[j-1] = node.vals[j]
 	}
-	node.keys[node.nkeys-1] = 0
+	node.keys[node.nkeys-1] = *new(K) // default key
 	node.vals[node.nkeys-1] = 0
 	node.nkeys--
 }
 
-func (node *LeafNode) removeMinKeyVal() (key, val int) {
+func (node *LeafNode[K]) removeMinKeyVal() (key K, val int) {
 	key = node.keys[0]
 	val = node.vals[0]
 	node.delKeyValByIndex(0)
 	return
 }
 
-func (node *LeafNode) removeMaxKeyVal() (key, val int) {
+func (node *LeafNode[K]) removeMaxKeyVal() (key K, val int) {
 	key = node.keys[node.nkeys-1]
 	val = node.vals[node.nkeys-1]
-	node.keys[node.nkeys-1] = 0
+	node.keys[node.nkeys-1] = *new(K)
 	node.vals[node.nkeys-1] = 0
 	node.nkeys--
 	return
 }
 
-func (node *LeafNode) appendMaxKeyVal(key, val int) {
+func (node *LeafNode[K]) appendMaxKeyVal(key K, val int) {
 	node.keys[node.nkeys] = key
 	node.vals[node.nkeys] = val
 	node.nkeys++
 }
 
-func (node *LeafNode) stealFromLeft(leftp BTreeNode, parentKey int) (midKey int) {
-	left := leftp.(*LeafNode)
+func (node *LeafNode[K]) stealFromLeft(leftp BTreeNode[K], parentKey K) (midKey K) {
+	left := leftp.(*LeafNode[K])
 	key, val := left.removeMaxKeyVal()
 	node.insertKV(key, val) // TODO: 是不是专门写个函数会好一点，不调用insertKv；
 	return key              // note: key is exactly the min key in curr
 }
 
-func (node *LeafNode) stealFromRight(rightp BTreeNode, parentKey int) (midKey int) {
-	right := rightp.(*LeafNode)
+func (node *LeafNode[K]) stealFromRight(rightp BTreeNode[K], parentKey K) (midKey K) {
+	right := rightp.(*LeafNode[K])
 	key, val := right.removeMinKeyVal()
 	node.appendMaxKeyVal(key, val)
 	return right.getLeftMostKey()
 }
 
-func (node *LeafNode) mergeWithRight(rightp BTreeNode, parentKey int) {
+func (node *LeafNode[K]) mergeWithRight(rightp BTreeNode[K], parentKey K) {
 	//merge的时候，把在右边的key和val都copy过来，
 	left := node
-	right := rightp.(*LeafNode)
+	right := rightp.(*LeafNode[K])
 	j := left.nkeys
 	for i := 0; i < right.nkeys; i++ {
 		left.keys[j] = right.keys[i]
@@ -228,11 +234,11 @@ func (node *LeafNode) mergeWithRight(rightp BTreeNode, parentKey int) {
 	}
 }
 
-func (node *LeafNode) PrintDotGraph(w io.Writer) {
+func (node *LeafNode[K]) PrintDotGraph(w io.Writer) {
 	fmt.Fprintf(w, "node%d [label = \"", node.id)
 	fmt.Fprintf(w, "<f0> ") // for prev ptr
 	for i := 0; i < node.nkeys; i++ {
-		fmt.Fprintf(w, "|<f%d> %d", 2*i+1, node.keys[i]) // for the keys[i]
+		fmt.Fprintf(w, "|<f%d> %v", 2*i+1, node.keys[i]) // for the keys[i]
 		//fmt.Fprintf(w, "|<f%d> val:%d", 2*i+1, node.vals[i])	// for the vals[i]
 		fmt.Fprintf(w, "|<f%d> v", 2*i+2) // for the vals[i]
 	}
@@ -251,42 +257,42 @@ func (node *LeafNode) PrintDotGraph(w io.Writer) {
 	*/
 }
 
-type InternalNode struct {
+type InternalNode[K Key] struct {
 	id    int
 	nkeys int
-	keys  []int
-	ptrs  []BTreeNode
+	keys  []K
+	ptrs  []BTreeNode[K]
 }
 
-func NewInternalNode(degree int) *InternalNode {
+func NewInternalNode[K Key](degree int) *InternalNode[K] {
 	id++
-	return &InternalNode{
+	return &InternalNode[K]{
 		id:   id,
-		keys: make([]int, degree),
-		ptrs: make([]BTreeNode, degree+1),
+		keys: make([]K, degree),
+		ptrs: make([]BTreeNode[K], degree+1),
 	}
 }
 
-func (node *InternalNode) degree() int {
+func (node *InternalNode[K]) degree() int {
 	return len(node.keys)
 }
-func (node *InternalNode) getNKeys() int {
+func (node *InternalNode[K]) getNKeys() int {
 	return node.nkeys
 }
 
-func (node *InternalNode) isLeafNode() bool {
+func (node *InternalNode[K]) isLeafNode() bool {
 	return false
 }
 
-func (node *InternalNode) needSplit() bool {
+func (node *InternalNode[K]) needSplit() bool {
 	return node.nkeys == len(node.keys)
 }
 
-func (node *InternalNode) getLeftMostKey() int {
+func (node *InternalNode[K]) getLeftMostKey() K {
 	return node.keys[0]
 }
 
-func (node *InternalNode) find(key int) (*LeafNode, int) {
+func (node *InternalNode[K]) find(key K) (*LeafNode[K], int) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key < node.keys[i] {
@@ -296,11 +302,11 @@ func (node *InternalNode) find(key int) (*LeafNode, int) {
 	return node.ptrs[i].find(key)
 }
 
-func (node *InternalNode) findMinLeaf() *LeafNode {
+func (node *InternalNode[K]) findMinLeaf() *LeafNode[K] {
 	return node.ptrs[0].findMinLeaf()
 }
 
-func (node *InternalNode) delete(key int) {
+func (node *InternalNode[K]) delete(key K) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key < node.keys[i] {
@@ -343,32 +349,32 @@ func (node *InternalNode) delete(key int) {
 	}
 }
 
-func (node *InternalNode) stealFromLeft(leftp BTreeNode, parentKey int) (midKey int) {
+func (node *InternalNode[K]) stealFromLeft(leftp BTreeNode[K], parentKey K) (midKey K) {
 	/* 要拿到key来自于父节点，还要从left sibling那最大的一个指针过来，作为这边最小的指针，
 	然后left sibling的最大的key变为父节点的key；
 	*/
-	left := leftp.(*InternalNode)
+	left := leftp.(*InternalNode[K])
 	key, ptr := left.removeMaxKeyAndPtr()
 	node.appendMinKeyAndPtr(parentKey, ptr)
 	return key
 }
 
-func (node *InternalNode) stealFromRight(rightp BTreeNode, parentKey int) (midKey int) {
+func (node *InternalNode[K]) stealFromRight(rightp BTreeNode[K], parentKey K) (midKey K) {
 	/* 要拿到key来自于父节点，还要从right sibling那最小的一个指针过来，作为这边最大的指针，
 	然后right sibling最小的key变为父节点的key；
 	*/
-	right := rightp.(*InternalNode)
+	right := rightp.(*InternalNode[K])
 	key, ptr := right.removeMinKeyAndPtr()
 	node.appendMaxKeyAndPtr(parentKey, ptr)
 	return key
 }
 
-func (node *InternalNode) mergeWithRight(rightp BTreeNode, parentKey int) {
+func (node *InternalNode[K]) mergeWithRight(rightp BTreeNode[K], parentKey K) {
 	/* 和叶子节点的merge不同，需要先把parent的key copy过来，
 	然后copy right sibling的key和ptr；然后删除parent的key和它相邻的右边的指针
 	*/
 	left := node
-	right := rightp.(*InternalNode)
+	right := rightp.(*InternalNode[K])
 	left.keys[left.nkeys] = parentKey
 	left.nkeys++
 	j := left.nkeys
@@ -381,24 +387,24 @@ func (node *InternalNode) mergeWithRight(rightp BTreeNode, parentKey int) {
 	left.nkeys += right.nkeys
 }
 
-func (node *InternalNode) removeMinKeyAndPtr() (key int, ptr BTreeNode) {
+func (node *InternalNode[K]) removeMinKeyAndPtr() (key K, ptr BTreeNode[K]) {
 	key = node.keys[0]
 	ptr = node.ptrs[0]
 	node.delKeyandPtrByIndex(0, 0)
 	return
 }
 
-func (node *InternalNode) appendMaxKeyAndPtr(key int, ptr BTreeNode) {
+func (node *InternalNode[K]) appendMaxKeyAndPtr(key K, ptr BTreeNode[K]) {
 	node.keys[node.nkeys] = key
 	node.ptrs[node.nkeys+1] = ptr
 	node.nkeys++
 }
 
-func (node *InternalNode) delKeyandPtrByIndex(keyStart, ptrStart int) {
+func (node *InternalNode[K]) delKeyandPtrByIndex(keyStart, ptrStart int) {
 	for j := keyStart + 1; j < node.nkeys; j++ {
 		node.keys[j-1] = node.keys[j]
 	}
-	node.keys[node.nkeys-1] = 0
+	node.keys[node.nkeys-1] = *new(K)
 	for j := ptrStart + 1; j <= node.nkeys; j++ {
 		node.ptrs[j-1] = node.ptrs[j]
 	}
@@ -406,16 +412,16 @@ func (node *InternalNode) delKeyandPtrByIndex(keyStart, ptrStart int) {
 	node.nkeys--
 }
 
-func (node *InternalNode) removeMaxKeyAndPtr() (key int, ptr BTreeNode) {
+func (node *InternalNode[K]) removeMaxKeyAndPtr() (key K, ptr BTreeNode[K]) {
 	key = node.keys[node.nkeys-1]
-	node.keys[node.nkeys-1] = 0
+	node.keys[node.nkeys-1] = *new(K)
 	ptr = node.ptrs[node.nkeys]
 	node.ptrs[node.nkeys] = nil
 	node.nkeys--
 	return
 }
 
-func (node *InternalNode) appendMinKeyAndPtr(key int, ptr BTreeNode) {
+func (node *InternalNode[K]) appendMinKeyAndPtr(key K, ptr BTreeNode[K]) {
 	node.nkeys++
 	for j := node.nkeys - 1; j > 0; j-- {
 		node.keys[j] = node.keys[j-1]
@@ -427,7 +433,7 @@ func (node *InternalNode) appendMinKeyAndPtr(key int, ptr BTreeNode) {
 	node.ptrs[0] = ptr
 }
 
-func (node *InternalNode) insertKV(key, val int) (int, BTreeNode) {
+func (node *InternalNode[K]) insertKV(key K, val int) (K, BTreeNode[K]) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key < node.keys[i] {
@@ -437,7 +443,7 @@ func (node *InternalNode) insertKV(key, val int) (int, BTreeNode) {
 	// assert: ptrs[i] is the place to go, note when i == node.nkeys, ptrs[i] is still valid
 	promotedKey, newChild := node.ptrs[i].insertKV(key, val)
 	if newChild == nil {
-		return 0, nil
+		return *new(K), nil
 	}
 
 	// assert newChild != nil
@@ -451,7 +457,7 @@ func (node *InternalNode) insertKV(key, val int) (int, BTreeNode) {
 
 	if node.needSplit() {
 		deg := node.degree()
-		rightSibling := NewInternalNode(deg)
+		rightSibling := NewInternalNode[K](deg)
 		nLeft := deg / 2
 		nRight := deg - nLeft - 1
 		l := node.nkeys - 1
@@ -459,7 +465,7 @@ func (node *InternalNode) insertKV(key, val int) (int, BTreeNode) {
 		for r := nRight - 1; r >= 0; r-- {
 			rightSibling.keys[r] = node.keys[l]
 			rightSibling.ptrs[r+1] = node.ptrs[l+1]
-			node.keys[l] = 0
+			node.keys[l] = *new(K)
 			node.ptrs[l+1] = nil
 			l--
 		}
@@ -467,20 +473,20 @@ func (node *InternalNode) insertKV(key, val int) (int, BTreeNode) {
 		node.ptrs[l+1] = nil
 
 		pKey := node.keys[l]
-		node.keys[l] = 0
+		node.keys[l] = *new(K)
 		node.nkeys = nLeft
 		rightSibling.nkeys = nRight
 		return pKey, rightSibling
 	}
 
-	return 0, nil
+	return *new(K), nil
 }
 
-func (node *InternalNode) PrintDotGraph(w io.Writer) {
+func (node *InternalNode[K]) PrintDotGraph(w io.Writer) {
 	fmt.Fprintf(w, "node%d [label = \"", node.id)
 	fmt.Fprintf(w, "<f0> ") // for the ptr[0]
 	for i := 0; i < node.nkeys; i++ {
-		fmt.Fprintf(w, "|<f%d> %d", 2*i+1, node.keys[i]) // for key i
+		fmt.Fprintf(w, "|<f%d> %v", 2*i+1, node.keys[i]) // for key i
 		fmt.Fprintf(w, "|<f%d> ", 2*(i+1))               // for ptr i+1
 	}
 	fmt.Fprintln(w, "\"];")
@@ -493,26 +499,26 @@ func (node *InternalNode) PrintDotGraph(w io.Writer) {
 	}
 }
 
-func (node *InternalNode) getNodeId() int {
+func (node *InternalNode[K]) getNodeId() int {
 	return node.id
 }
 
-type BTree struct {
+type BTree[K Key] struct {
 	degree int
-	root   BTreeNode
+	root   BTreeNode[K]
 }
 
-func NewBTree(degree int) *BTree {
-	return &BTree{
+func NewBTree[K Key](degree int) *BTree[K] {
+	return &BTree[K]{
 		degree: degree,
-		root:   NewLeafNode(degree),
+		root:   NewLeafNode[K](degree),
 	}
 }
 
 // return keys betwwen [*lowKey, *highKey)，如果为nil表示没有界限
-func (tree *BTree) FindRange(lowKey, highKey *int) *Iterator {
+func (tree *BTree[K]) FindRange(lowKey, highKey *K) *Iterator[K] {
 	// 找到第一个包含 >= lowKey的leaf node，然后由Iterator提供顺序遍历功能
-	var leafNode *LeafNode
+	var leafNode *LeafNode[K]
 	var idx int
 	if lowKey == nil {
 		leafNode = tree.root.findMinLeaf()
@@ -520,7 +526,7 @@ func (tree *BTree) FindRange(lowKey, highKey *int) *Iterator {
 	} else {
 		leafNode, idx = tree.root.find(*lowKey)
 	}
-	return &Iterator{
+	return &Iterator[K]{
 		curr:    leafNode,
 		currIdx: idx,
 		lowKey:  lowKey,
@@ -528,7 +534,7 @@ func (tree *BTree) FindRange(lowKey, highKey *int) *Iterator {
 	}
 }
 
-func (tree *BTree) Find(key int) (int, bool) {
+func (tree *BTree[K]) Find(key K) (int, bool) {
 	leafNode, idx := tree.root.find(key)
 	if leafNode != nil && leafNode.keys[idx] == key {
 		return leafNode.vals[idx], true
@@ -536,12 +542,12 @@ func (tree *BTree) Find(key int) (int, bool) {
 	return 0, false
 }
 
-func (bt *BTree) Insert(key, val int) {
+func (bt *BTree[K]) Insert(key K, val int) {
 	promotedKey, rightSibling := bt.root.insertKV(key, val)
 	if rightSibling == nil {
 		return
 	}
-	newRoot := NewInternalNode(bt.degree)
+	newRoot := NewInternalNode[K](bt.degree)
 	newRoot.keys[0] = promotedKey
 	newRoot.nkeys = 1
 	newRoot.ptrs[0] = bt.root
@@ -549,25 +555,25 @@ func (bt *BTree) Insert(key, val int) {
 	bt.root = newRoot
 }
 
-func (bt *BTree) Delete(key int) {
+func (bt *BTree[K]) Delete(key K) {
 	bt.root.delete(key)
 	// 删除后，有可能root只剩下一个指针，没有key了，这时候需要去掉多余的root空节点
 	if !bt.root.isLeafNode() {
-		root := bt.root.(*InternalNode)
+		root := bt.root.(*InternalNode[K])
 		if root.nkeys == 0 {
 			bt.root = root.ptrs[0]
 		}
 	}
 }
 
-func (bt *BTree) PrintDotGraph(w io.Writer) {
+func (bt *BTree[K]) PrintDotGraph(w io.Writer) {
 	fmt.Fprintln(w, "digraph g {")
 	fmt.Fprintln(w, "node [shape = record,height=.1];")
 	bt.root.PrintDotGraph(w)
 	fmt.Fprintln(w, "}")
 }
 
-func (bt *BTree) PrintDotGraph2(fileName string) {
+func (bt *BTree[K]) PrintDotGraph2(fileName string) {
 	f, err := os.Create(fileName)
 	if err != nil {
 		log.Fatal(err)
@@ -578,13 +584,13 @@ func (bt *BTree) PrintDotGraph2(fileName string) {
 	f.Close()
 }
 
-type Iterator struct {
-	curr            *LeafNode
+type Iterator[K Key] struct {
+	curr            *LeafNode[K]
 	currIdx         int // index in LeafNode
-	lowKey, highKey *int
+	lowKey, highKey *K
 }
 
-func (it *Iterator) hasNext() bool {
+func (it *Iterator[K]) hasNext() bool {
 	if it.curr == nil {
 		return false
 	}
@@ -601,7 +607,7 @@ func (it *Iterator) hasNext() bool {
 	return it.curr.keys[it.currIdx] < *it.highKey
 }
 
-func (it *Iterator) next() (key, val int) {
+func (it *Iterator[K]) next() (key K, val int) {
 	key = it.curr.keys[it.currIdx]
 	val = it.curr.vals[it.currIdx]
 	it.currIdx++
