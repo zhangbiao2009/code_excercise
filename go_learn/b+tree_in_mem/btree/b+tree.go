@@ -10,7 +10,7 @@ import (
 
 var id int
 
-type BTreeNode interface {
+type BTreeNode interface {	// 为统一处理leaf node和internal node建立的抽象
 	isLeafNode() bool
 	insertKV(key, val int) (keyPromoted int, newRightSibling BTreeNode)
 	getLeftMostKey() int
@@ -502,42 +502,11 @@ type BTree struct {
 	root   BTreeNode
 }
 
-type Iterator struct {
-	curr            *LeafNode
-	currIdx         int // index in LeafNode
-	lowKey, highKey *int
-}
-
-func (it *Iterator) hasNext() bool {
-	if it.curr == nil {
-		return false
-	}
-	if it.currIdx == it.curr.nkeys {
-		it.curr = it.curr.next
-		it.currIdx = 0
-	}
-	if it.curr == nil {
-		return false
-	}
-	if it.highKey == nil {
-		return true
-	}
-	return it.curr.keys[it.currIdx] < *it.highKey
-}
-
-func (it *Iterator) next() (key, val int) {
-	key = it.curr.keys[it.currIdx]
-	val = it.curr.vals[it.currIdx]
-	it.currIdx++
-	return
-}
-
 func NewBTree(degree int) *BTree {
 	return &BTree{
 		degree: degree,
 		root:   NewLeafNode(degree),
 	}
-
 }
 
 // return keys betwwen [*lowKey, *highKey)，如果为nil表示没有界限
@@ -607,4 +576,34 @@ func (bt *BTree) PrintDotGraph2(fileName string) {
 	bt.PrintDotGraph(bw)
 	bw.Flush()
 	f.Close()
+}
+
+type Iterator struct {
+	curr            *LeafNode
+	currIdx         int // index in LeafNode
+	lowKey, highKey *int
+}
+
+func (it *Iterator) hasNext() bool {
+	if it.curr == nil {
+		return false
+	}
+	if it.currIdx == it.curr.nkeys {
+		it.curr = it.curr.next
+		it.currIdx = 0
+	}
+	if it.curr == nil {
+		return false
+	}
+	if it.highKey == nil {
+		return true
+	}
+	return it.curr.keys[it.currIdx] < *it.highKey
+}
+
+func (it *Iterator) next() (key, val int) {
+	key = it.curr.keys[it.currIdx]
+	val = it.curr.vals[it.currIdx]
+	it.currIdx++
+	return
 }
