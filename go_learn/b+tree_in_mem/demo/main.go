@@ -2,12 +2,12 @@ package main
 
 import (
 	"bufio"
-	"fmt"
 	"math/rand"
 	"os"
 
 	"excercise.com/btree/btree"
 )
+
 
 func main() {
 	bt := btree.NewBTree(5)

@@ -15,7 +15,8 @@ type BTreeNode interface {
 	insertKV(key, val int) (keyPromoted int, newRightSibling BTreeNode)
 	getLeftMostKey() int
 	delete(key int)
-	find(key int) (int, bool)
+	find(key int) (theNode *LeafNode, index int)
+	findMinLeaf() *LeafNode
 	degree() int
 	getNodeId() int
 	getNKeys() int
@@ -68,6 +69,10 @@ func (node *LeafNode) getNKeys() int {
 	return node.nkeys
 }
 
+func (node *LeafNode) findMinLeaf() *LeafNode {
+	return node
+}
+
 func (node *LeafNode) print() {
 	fmt.Printf("node id: %d\n", node.id)
 	fmt.Println("keys")
@@ -81,16 +86,19 @@ func (node *LeafNode) print() {
 	fmt.Println()
 }
 
-func (node *LeafNode) find(key int) (int, bool) {
-	for i := 0; i < node.nkeys; i++ {
-		if node.keys[i] == key { // key exists
-			return node.vals[i], true
-		}
-		if key < node.keys[i] {
+func (node *LeafNode) find(key int) (*LeafNode, int) {
+	i := 0
+	for ; i < node.nkeys; i++ {
+		if key <= node.keys[i] {
 			break
 		}
 	}
-	return 0, false
+	// assert: i == node.nkeys || key <= node.keys[i]
+	if i == node.nkeys {
+		return nil, -1
+	}
+	// key <= node.keys[i]
+	return node, i
 }
 
 // if split return right sibling else return null
@@ -278,15 +286,18 @@ func (node *InternalNode) getLeftMostKey() int {
 	return node.keys[0]
 }
 
-func (node *InternalNode) find(key int) (int, bool) {
+func (node *InternalNode) find(key int) (*LeafNode, int) {
 	i := 0
 	for ; i < node.nkeys; i++ {
 		if key < node.keys[i] {
 			break
 		}
 	}
-	// assert key >= node.keys[i]
 	return node.ptrs[i].find(key)
+}
+
+func (node *InternalNode) findMinLeaf() *LeafNode {
+	return node.ptrs[0].findMinLeaf()
 }
 
 func (node *InternalNode) delete(key int) {
@@ -492,6 +503,33 @@ type BTree struct {
 }
 
 type Iterator struct {
+	curr *LeafNode
+	currIdx int // index in LeafNode
+	lowKey, highKey *int
+}
+
+func (it *Iterator) hasNext() bool {
+	if it.curr == nil {
+		return false
+	}
+	if it.currIdx == it.curr.nkeys {
+		it.curr = it.curr.next
+		it.currIdx = 0
+	}
+	if it.curr == nil {
+		return false
+	}
+	if it.highKey == nil {
+		return true
+	}
+	return it.curr.keys[it.currIdx] < *it.highKey
+}
+
+func (it *Iterator) next() (key, val int){
+	key = it.curr.keys[it.currIdx]
+	val = it.curr.vals[it.currIdx]
+	it.currIdx++
+	return
 }
 
 func NewBTree(degree int) *BTree {
@@ -502,12 +540,31 @@ func NewBTree(degree int) *BTree {
 
 }
 
-func (tree *BTree) FindRange(lowKey, highKey int) []int {
-	return nil
+// return keys betwwen [*lowKey, *highKey)，如果为nil表示没有界限
+func (tree *BTree) FindRange(lowKey, highKey *int) *Iterator {
+	// 找到第一个包含 >= lowKey的leaf node，然后由Iterator提供顺序遍历功能
+	var leafNode *LeafNode
+	var idx int
+	if lowKey == nil {
+		leafNode = tree.root.findMinLeaf()
+		idx = 0
+	} else {
+		leafNode, idx =tree.root.find(*lowKey)
+	}
+	return &Iterator{
+		curr: leafNode,
+		currIdx: idx,
+		lowKey: lowKey,
+		highKey: highKey,
+	}
 }
 
 func (tree *BTree) Find(key int) (int, bool) {
-	return tree.root.find(key)
+	leafNode, idx := tree.root.find(key)
+	if leafNode != nil && leafNode.keys[idx] == key {
+		return leafNode.vals[idx], true
+	}
+	return 0, false
 }
 
 func (bt *BTree) Insert(key, val int) {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"sort"
 	"testing"
 )
 
@@ -76,6 +77,8 @@ func getUniqueInts(n int) []int {
 		res[cnt] = num
 		cnt++
 	}
+	sort.Ints(res)
+	rand.Shuffle(len(res), func(i, j int) { res[i], res[j] = res[j], res[i] })
 	return res
 }
 
@@ -92,5 +95,146 @@ func TestBTreeFind(t *testing.T) {
 		if !ok || val != randKey*2 {
 			t.Error("failed")
 		}
+	}
+}
+
+func TestBTreeFindRange(t *testing.T) {
+	intSlice := getUniqueInts(37)
+	bt := NewBTree(5)
+	for _, num := range intSlice {
+		bt.Insert(num, num*2)
+	}
+	sort.Ints(intSlice)
+	for i := 0; i < 5; i++ {
+		ri := rand.Intn(len(intSlice))
+		ri2 := rand.Intn(len(intSlice))
+		if ri == ri2 {
+			continue
+		}
+		if ri > ri2 {
+			ri, ri2 = ri2, ri
+		}
+		lowKey := intSlice[ri]
+		highKey := intSlice[ri2]
+
+		it := bt.FindRange(&lowKey, &highKey)
+		for it.hasNext() {
+			key, val := it.next()
+			if key != intSlice[ri] || val != 2*key {
+				t.Error("failed")
+				break
+			}
+			ri++
+		}
+		if ri != ri2 {
+			t.Error("failed")
+		}
+	}
+}
+
+func TestBTreeFindRange2(t *testing.T) {
+	intSlice := getUniqueInts(39)
+	bt := NewBTree(5)
+	for _, num := range intSlice {
+		bt.Insert(num, num*2)
+	}
+	sort.Ints(intSlice)
+	for i := 0; i < 5; i++ {
+		ri := rand.Intn(len(intSlice))
+		lowKey := intSlice[ri]
+		nKeys := len(intSlice) - ri
+
+		cnt := 0
+		var laskKey *int = nil
+		it := bt.FindRange(&lowKey, nil)
+		for it.hasNext() {
+			key, val := it.next()
+			if key != intSlice[ri] || val != 2*key {
+				t.Error("failed")
+				break
+			}
+			if laskKey == nil {
+				laskKey = &key
+			} else {
+				if key < *laskKey {
+					t.Error("failed")
+					break
+				}
+			}
+			ri++
+			cnt++
+		}
+		if cnt != nKeys {
+			t.Error("failed")
+		}
+	}
+}
+
+func TestBTreeFindRange3(t *testing.T) {
+	intSlice := getUniqueInts(39)
+	bt := NewBTree(5)
+	for _, num := range intSlice {
+		bt.Insert(num, num*2)
+	}
+	sort.Ints(intSlice)
+	for i := 0; i < 5; i++ {
+		ri := rand.Intn(len(intSlice))
+		highKey := intSlice[ri]
+		nKeys := ri
+
+		cnt := 0
+		var laskKey *int = nil
+		it := bt.FindRange(nil, &highKey)
+		for it.hasNext() {
+			key, val := it.next()
+			if key != intSlice[cnt] || val != 2*key {
+				t.Error("failed")
+				break
+			}
+			if laskKey == nil {
+				laskKey = &key
+			} else {
+				if key < *laskKey {
+					t.Error("failed")
+					break
+				}
+			}
+			cnt++
+		}
+		if cnt != nKeys {
+			t.Error("failed")
+		}
+	}
+}
+
+func TestBTreeFindRange4(t *testing.T) {
+	intSlice := getUniqueInts(39)
+	bt := NewBTree(5)
+	for _, num := range intSlice {
+		bt.Insert(num, num*2)
+	}
+	sort.Ints(intSlice)
+	nKeys := len(intSlice)
+	cnt := 0
+	var laskKey *int = nil
+	it := bt.FindRange(nil, nil)
+	for it.hasNext() {
+		key, val := it.next()
+		if key != intSlice[cnt] || val != 2*key {
+			t.Error("failed")
+			break
+		}
+		if laskKey == nil {
+			laskKey = &key
+		} else {
+			if key < *laskKey {
+				t.Error("failed")
+				break
+			}
+		}
+		cnt++
+	}
+	if cnt != nKeys {
+		t.Error("failed")
 	}
 }
