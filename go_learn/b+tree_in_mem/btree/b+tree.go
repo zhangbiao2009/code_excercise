@@ -503,8 +503,8 @@ type BTree struct {
 }
 
 type Iterator struct {
-	curr *LeafNode
-	currIdx int // index in LeafNode
+	curr            *LeafNode
+	currIdx         int // index in LeafNode
 	lowKey, highKey *int
 }
 
@@ -525,7 +525,7 @@ func (it *Iterator) hasNext() bool {
 	return it.curr.keys[it.currIdx] < *it.highKey
 }
 
-func (it *Iterator) next() (key, val int){
+func (it *Iterator) next() (key, val int) {
 	key = it.curr.keys[it.currIdx]
 	val = it.curr.vals[it.currIdx]
 	it.currIdx++
@@ -549,12 +549,12 @@ func (tree *BTree) FindRange(lowKey, highKey *int) *Iterator {
 		leafNode = tree.root.findMinLeaf()
 		idx = 0
 	} else {
-		leafNode, idx =tree.root.find(*lowKey)
+		leafNode, idx = tree.root.find(*lowKey)
 	}
 	return &Iterator{
-		curr: leafNode,
+		curr:    leafNode,
 		currIdx: idx,
-		lowKey: lowKey,
+		lowKey:  lowKey,
 		highKey: highKey,
 	}
 }
