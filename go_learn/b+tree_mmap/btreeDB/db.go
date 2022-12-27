@@ -304,7 +304,7 @@ func (db *DB) insert(blockId int, key, val []byte) (promotedKey []byte, newSibli
 		for r := nRight - 1; r >= 0; r-- {
 			rightSibling.insertKeyInPos(r, node.getKey(l))
 			rightSibling.setChildBlockId(r+1, node.getChildBlockId(l+1))
-			node.setKeyPtr(l, 0)
+			node.clearKeyPtr(l)
 			node.setChildBlockId(l+1, 0)
 			l--
 		}
@@ -312,7 +312,7 @@ func (db *DB) insert(blockId int, key, val []byte) (promotedKey []byte, newSibli
 		node.setChildBlockId(l+1, 0)
 
 		pKey := node.getKey(l)
-		node.setKeyPtr(l, 0) // 清空对应的key指针
+		node.clearKeyPtr(l) // 清空对应的key指针
 		node.nKeys = nLeft
 		node.setNKeys(uint16(node.nKeys))
 		rightSibling.nKeys = nRight
@@ -374,8 +374,8 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 			k := node.getKey(l)
 			v := node.getVal(l)
 			rightSibling.insertKvInPos(r, k, v)
-			node.setKeyPtr(l, 0)
-			node.setValPtr(l, 0)
+			node.clearKeyPtr(l)
+			node.clearValPtr(l)
 			l--
 		}
 		node.nKeys = nLeft
@@ -387,30 +387,7 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 	return nil, nil, nil
 }
 
-func (node *Node) getKeyOffset(i int) int {
-	keyPtrArray := node.blockId*BLOCK_SIZE + BLOCK_MAGIC_SIZE + 1 + 1 + 2 + 2
-	KeyPtrIdxOffset := keyPtrArray + 2*i
-	keyOffset := getUint16(node.mmap[KeyPtrIdxOffset:])
-	return int(keyOffset)
-}
-
-func (node *Node) getValOffset(i int) int {
-	keyPtrArray := node.blockId*BLOCK_SIZE + BLOCK_MAGIC_SIZE + 1 + 1 + 2 + 2
-	valPtrArray := keyPtrArray + 2*node.degree
-	valPtrIdxOffset := valPtrArray + 2*i
-	valOffset := getUint16(node.mmap[valPtrIdxOffset:])
-	return int(valOffset)
-}
 func (node *Node) getKeyPtrOffset(i int) int {
-	/*
-			8字节的block start magic
-		1字节，flag，是否是叶子节点
-		1字节，padding，作用待定
-		2字节，nkeys
-		2字节，unused_mem_offset
-		预先分配的key指针数组，每个key指针两个字节
-		预先分配的ptr指针数组，每个ptr存储一个子block id，4个字节
-	*/
 	keyPtrArray := node.blockId*BLOCK_SIZE + BLOCK_MAGIC_SIZE + 1 + 1 + 2 + 2
 	return keyPtrArray + 2*i
 }
@@ -428,31 +405,40 @@ func (node *Node) getChildBlockIdOffset(i int) int {
 }
 
 func (node *Node) getKey(i int) []byte {
-	keyOffset := node.getKeyOffset(i)
+	keyOffset := node.getKeyPtr(i)
 	return getByteSlice(node.mmap[keyOffset:])
 }
 
 func (node *Node) getVal(i int) []byte {
-	valOffset := node.getValOffset(i)
+	valOffset := node.getValPtr(i)
 	return getByteSlice(node.mmap[valOffset:])
 }
 
-func (node *Node) getKeyPtr(i int) uint16 {
+func (node *Node) getKeyPtr(i int) int {
 	keyPtrOffset := node.getKeyPtrOffset(i)
-	return getUint16(node.mmap[keyPtrOffset:])
+	return int(getUint16(node.mmap[keyPtrOffset:])) + node.blockId*BLOCK_SIZE
 }
 
-func (node *Node) setKeyPtr(i int, val uint16) {
+func (node *Node) setKeyPtr(i int, val int) {
 	keyPtrOffset := node.getKeyPtrOffset(i)
-	putUint16(node.mmap[keyPtrOffset:], val)
+	putUint16(node.mmap[keyPtrOffset:], uint16(val - node.blockId*BLOCK_SIZE))	// 写入相对地址
 }
-func (node *Node) getValPtr(i int) (offset uint16) {
-	valPtrOffset := node.getValPtrOffset(i)
-	return getUint16(node.mmap[valPtrOffset:])
+func (node *Node) clearKeyPtr(i int) {
+	keyPtrOffset := node.getKeyPtrOffset(i)
+	putUint16(node.mmap[keyPtrOffset:], 0)
 }
-func (node *Node) setValPtr(i int, val uint16) {
+func (node *Node) getValPtr(i int) int {
 	valPtrOffset := node.getValPtrOffset(i)
-	putUint16(node.mmap[valPtrOffset:], val)
+	return int(getUint16(node.mmap[valPtrOffset:])) + node.blockId*BLOCK_SIZE
+}
+func (node *Node) setValPtr(i int, val int) {
+	valPtrOffset := node.getValPtrOffset(i)
+	putUint16(node.mmap[valPtrOffset:], uint16(val - node.blockId*BLOCK_SIZE))
+}
+
+func (node *Node) clearValPtr(i int) {
+	valPtrOffset := node.getValPtrOffset(i)
+	putUint16(node.mmap[valPtrOffset:], 0)
 }
 
 func (node *Node) getChildBlockId(i int) int {
@@ -471,18 +457,18 @@ func (node *Node) insertKvInPos(i int, key, val []byte) {
 }
 
 func (node *Node) insertKeyInPos(i int, key []byte) {
-	newKeyOffset := node.unusedOffset + uint16(node.blockId)*BLOCK_SIZE
+	newKeyOffset := int(node.unusedOffset) + node.blockId*BLOCK_SIZE
 	size := putByteSlice(node.mmap[newKeyOffset:], key)
-	node.setKeyPtr(i, newKeyOffset) // TODO: 写入了绝对地址！需要改成相对的
+	node.setKeyPtr(i, newKeyOffset)
 	node.unusedOffset += uint16(size)
 	unuseOffsetAddr := node.blockId*BLOCK_SIZE + BLOCK_MAGIC_SIZE + 1 + 1 + 2
 	putUint16(node.mmap[unuseOffsetAddr:], node.unusedOffset)
 }
 
 func (node *Node) insertValInPos(i int, val []byte) {
-	newValOffset := node.unusedOffset + uint16(node.blockId)*BLOCK_SIZE
+	newValOffset := int(node.unusedOffset) + node.blockId*BLOCK_SIZE
 	size := putByteSlice(node.mmap[newValOffset:], val)
-	node.setValPtr(i, uint16(newValOffset))		// TODO: 写入了绝对地址！需要改成相对的
+	node.setValPtr(i, newValOffset)
 	node.unusedOffset += uint16(size)
 	unuseOffsetAddr := node.blockId*BLOCK_SIZE + BLOCK_MAGIC_SIZE + 1 + 1 + 2
 	putUint16(node.mmap[unuseOffsetAddr:], node.unusedOffset)

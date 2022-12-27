@@ -113,8 +113,9 @@ func getUniqueInts(n int) []int {
 
 func TestBTreeFind(t *testing.T) {
 	createDB(5)
-	intSlice := getUniqueInts(17)
-	for _, num := range intSlice {
+	intSlice := getUniqueInts(360)
+	for i, num := range intSlice {
+		_ = i
 		key := fmt.Sprintf("k%d", num)
 		val := fmt.Sprintf("v%d", num)
 		db.Insert([]byte(key), []byte(val))
@@ -123,10 +124,10 @@ func TestBTreeFind(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		ri := rand.Intn(len(intSlice))
 		randKey := fmt.Sprintf("k%d", intSlice[ri])
-		expectVal := fmt.Sprintf("v%d", intSlice[ri]) 
+		expectVal := fmt.Sprintf("v%d", intSlice[ri])
 		val, err := db.Find([]byte(randKey))
-		if err != nil || bytes.Compare(val, []byte(expectVal)) != 0{
-			t.Error("failed")
+		if err != nil || bytes.Compare(val, []byte(expectVal)) != 0 {
+			t.Errorf("failed, key: %s, val: %s, expectVal: %s\n", randKey, val, expectVal)
 		}
 	}
 }
@@ -137,10 +138,20 @@ func TestDBFind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	key := []byte("ssskey")
-	valRead, err := db.Find(key)
-	if err != nil {
-		t.Error(err)
+	m := map[string]string{
+		"k23456": "v23456",
+		"k34375": "v34375",
+		"k25737": "v25737",
+		"k6682":  "v6682",
+		"k31871": "v31871",
 	}
-	t.Logf("%v", valRead)
+	for k, v := range m {
+		key := []byte(k)
+		expVal := []byte(v)
+		valRead, err := db.Find(key)
+		if err != nil || bytes.Compare(valRead, []byte(expVal)) != 0 {
+			t.Errorf("failed, key: %s, val: %s, expectVal: %s\n", key, valRead, expVal)
+		}
+	}
+
 }
