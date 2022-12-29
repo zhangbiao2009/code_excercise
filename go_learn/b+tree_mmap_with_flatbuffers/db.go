@@ -329,7 +329,7 @@ func (node *Node) appendToFreeMem(content []byte) int {
 
 func (node *Node) compactMem() {
 	unusedMemStart := int(*node.UnusedMemStart())
-	tmpMem := make([]byte, BLOCK_SIZE-unusedMemStart) // 大小正好覆盖一个block的可用空间
+	tmpMem := make([]byte, *node.UnusedMemOffset()-uint16(unusedMemStart)) // 大小正好覆盖所有写过的空间
 	start := 0
 	for i := 0; i < node.nKeys(); i++ {
 		key := node.getKey(i)

@@ -65,6 +65,9 @@ func TestDBInsertSplit(t *testing.T) {
 			t.Errorf("key: %s, err: %v", k, err)
 		}
 	}
+	if err := db.Insert([]byte("key0"), []byte("val0")); err != nil {
+		t.Errorf("key: key0, err: %v", err)
+	}
 	for k, v := range m {
 		key := []byte(k)
 		val := []byte(v)
