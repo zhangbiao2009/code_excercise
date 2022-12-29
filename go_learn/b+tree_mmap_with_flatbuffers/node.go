@@ -139,6 +139,7 @@ func newNodeBlock(outputBuf []byte, degree int, isLeaf bool) *utils.NodeBlock {
 	} else {
 		utils.NodeBlockAddChildNodeId(builder, childBlockIdArr)
 	}
+	utils.NodeBlockAddUnusedMemStart(builder, 0)
 	utils.NodeBlockAddUnusedMemOffset(builder, 0)
 	builder.Finish(utils.NodeBlockEnd(builder))
 	bytes := builder.FinishedBytes()
@@ -147,6 +148,8 @@ func newNodeBlock(outputBuf []byte, degree int, isLeaf bool) *utils.NodeBlock {
 	copy(outputBuf, bytes) // 构造好后，copy到mmap中
 
 	nodeBlock := utils.GetRootAsNodeBlock(outputBuf, 0)
-	nodeBlock.MutateUnusedMemOffset(uint16(BLOCK_MAGIC_SIZE) + nBytesUsed) // set unused mem offset
+	unusedMemOffset := uint16(BLOCK_MAGIC_SIZE) + nBytesUsed
+	nodeBlock.MutateUnusedMemStart(unusedMemOffset)
+	nodeBlock.MutateUnusedMemOffset(unusedMemOffset) // set unused mem offset
 	return nodeBlock
 }

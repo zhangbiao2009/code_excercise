@@ -238,6 +238,7 @@ func (db *DB) insert(blockId int, key, val []byte) (promotedKey []byte, newSibli
 		pKey := node.getKey(l)
 		node.clearKeyPtr(l) // 清空对应的key指针
 		node.setNKeys(nLeft)
+		node.compactMem()
 		rightSibling.setNKeys(nRight)
 		return pKey, rightSibling, nil
 	}
@@ -296,6 +297,7 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 			l--
 		}
 		node.setNKeys(nLeft)
+		node.compactMem()
 		rightSibling.setNKeys(nRight)
 		return rightSibling.getKey(0), rightSibling, nil
 	}
@@ -323,6 +325,27 @@ func (node *Node) appendToFreeMem(content []byte) int {
 	size := putByteSlice(node.db.mmap[freeMemOffset:], content)
 	node.MutateUnusedMemOffset(uint16(ununsedOffset + size))
 	return freeMemOffset
+}
+
+func (node *Node) compactMem() {
+	unusedMemStart := int(*node.UnusedMemStart())
+	tmpMem := make([]byte, BLOCK_SIZE-unusedMemStart) // 大小正好覆盖一个block的可用空间
+	start := 0
+	for i := 0; i < node.nKeys(); i++ {
+		key := node.getKey(i)
+		size := putByteSlice(tmpMem[start:], key)
+		node.MutateKeyPtrArr(i, uint16(unusedMemStart+start))	// 更新key的偏移量
+		start += size
+		if node.isLeaf() {
+			val := node.getVal(i)
+			size = putByteSlice(tmpMem[start:], val)	// 更新val的偏移量
+			node.MutateValPtrArr(i, uint16(unusedMemStart+start))
+			start += size
+		}
+	}
+	// copy compact之后的内容，顺带清空没用的空间
+	copy(node.db.mmap[node.blockId*BLOCK_SIZE+unusedMemStart:], tmpMem)
+	node.MutateUnusedMemOffset(uint16(unusedMemStart + start))
 }
 
 func (node *Node) setVal(i int, val []byte) { // update val i
