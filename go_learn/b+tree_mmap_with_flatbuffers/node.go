@@ -142,10 +142,10 @@ func newNodeBlock(outputBuf []byte, degree int, isLeaf bool) *utils.NodeBlock {
 	utils.NodeBlockAddKeyPtrArr(builder, keyPtrArr)
 	if isLeaf {
 		utils.NodeBlockAddValPtrArr(builder, valPtrArr)
+		utils.NodeBlockAddActualMemRequired(builder, 0)		// only leaf node needs this
 	} else {
 		utils.NodeBlockAddChildNodeId(builder, childBlockIdArr)
 	}
-	utils.NodeBlockAddActualMemRequired(builder, 0)
 	utils.NodeBlockAddUnusedMemStart(builder, 0)
 	utils.NodeBlockAddUnusedMemOffset(builder, 0)
 	builder.Finish(utils.NodeBlockEnd(builder))
