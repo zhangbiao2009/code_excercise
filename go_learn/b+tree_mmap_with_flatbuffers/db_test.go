@@ -114,14 +114,14 @@ func getUniqueInts(n int) []int {
 
 func TestBTreeFind(t *testing.T) {
 	createDB(5)
-	intSlice := getUniqueInts(36)
+	intSlice := getUniqueInts(360)
 	for i, num := range intSlice {
 		_ = i
 		key := fmt.Sprintf("k%d", num)
 		val := fmt.Sprintf("v%d", num)
 		db.Insert([]byte(key), []byte(val))
 	}
-	db.PrintDotGraph2("mydb.dot")
+	//db.PrintDotGraph2("mydb.dot")
 	for i := 0; i < 5; i++ {
 		ri := rand.Intn(len(intSlice))
 		randKey := fmt.Sprintf("k%d", intSlice[ri])

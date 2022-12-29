@@ -308,19 +308,21 @@ func (node *Node) insertKvInPos(i int, key, val []byte) {
 }
 
 func (node *Node) insertKeyInPos(i int, key []byte) {
-	ununsedOffset := int(*node.UnusedMemOffset())
-	newKeyOffset := ununsedOffset + node.blockId*BLOCK_SIZE
-	size := putByteSlice(node.db.mmap[newKeyOffset:], key)
+	newKeyOffset := node.appendToFreeMem(key)
 	node.setKeyPtr(i, newKeyOffset)
-	node.MutateUnusedMemOffset(uint16(ununsedOffset + size))
 }
 
 func (node *Node) insertValInPos(i int, val []byte) {
-	ununsedOffset := int(*node.UnusedMemOffset())
-	newValOffset := ununsedOffset + node.blockId*BLOCK_SIZE
-	size := putByteSlice(node.db.mmap[newValOffset:], val)
+	newValOffset := node.appendToFreeMem(val)
 	node.setValPtr(i, newValOffset)
+}
+
+func (node *Node) appendToFreeMem(content []byte) int {
+	ununsedOffset := int(*node.UnusedMemOffset())
+	freeMemOffset := ununsedOffset + node.blockId*BLOCK_SIZE
+	size := putByteSlice(node.db.mmap[freeMemOffset:], content)
 	node.MutateUnusedMemOffset(uint16(ununsedOffset + size))
+	return freeMemOffset
 }
 
 func (node *Node) setVal(i int, val []byte) { // update val i
