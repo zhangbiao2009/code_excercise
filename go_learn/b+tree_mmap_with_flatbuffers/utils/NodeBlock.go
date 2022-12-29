@@ -72,7 +72,7 @@ func (rcv *NodeBlock) MutateNkeys(n uint16) bool {
 	return rcv._tab.MutateUint16Slot(8, n)
 }
 
-func (rcv *NodeBlock) UnusedMemOffset() *uint16 {
+func (rcv *NodeBlock) ActualMemRequired() *uint16 {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(10))
 	if o != 0 {
 		v := rcv._tab.GetUint16(o + rcv._tab.Pos)
@@ -81,12 +81,38 @@ func (rcv *NodeBlock) UnusedMemOffset() *uint16 {
 	return nil
 }
 
-func (rcv *NodeBlock) MutateUnusedMemOffset(n uint16) bool {
+func (rcv *NodeBlock) MutateActualMemRequired(n uint16) bool {
 	return rcv._tab.MutateUint16Slot(10, n)
 }
 
-func (rcv *NodeBlock) KeyPtrArr(j int) uint16 {
+func (rcv *NodeBlock) UnusedMemStart() *uint16 {
 	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	if o != 0 {
+		v := rcv._tab.GetUint16(o + rcv._tab.Pos)
+		return &v
+	}
+	return nil
+}
+
+func (rcv *NodeBlock) MutateUnusedMemStart(n uint16) bool {
+	return rcv._tab.MutateUint16Slot(12, n)
+}
+
+func (rcv *NodeBlock) UnusedMemOffset() *uint16 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	if o != 0 {
+		v := rcv._tab.GetUint16(o + rcv._tab.Pos)
+		return &v
+	}
+	return nil
+}
+
+func (rcv *NodeBlock) MutateUnusedMemOffset(n uint16) bool {
+	return rcv._tab.MutateUint16Slot(14, n)
+}
+
+func (rcv *NodeBlock) KeyPtrArr(j int) uint16 {
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.GetUint16(a + flatbuffers.UOffsetT(j*2))
@@ -95,7 +121,7 @@ func (rcv *NodeBlock) KeyPtrArr(j int) uint16 {
 }
 
 func (rcv *NodeBlock) KeyPtrArrLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
 	}
@@ -103,7 +129,7 @@ func (rcv *NodeBlock) KeyPtrArrLength() int {
 }
 
 func (rcv *NodeBlock) MutateKeyPtrArr(j int, n uint16) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(12))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.MutateUint16(a+flatbuffers.UOffsetT(j*2), n)
@@ -112,7 +138,7 @@ func (rcv *NodeBlock) MutateKeyPtrArr(j int, n uint16) bool {
 }
 
 func (rcv *NodeBlock) ValPtrArr(j int) uint16 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.GetUint16(a + flatbuffers.UOffsetT(j*2))
@@ -121,7 +147,7 @@ func (rcv *NodeBlock) ValPtrArr(j int) uint16 {
 }
 
 func (rcv *NodeBlock) ValPtrArrLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
 	}
@@ -129,7 +155,7 @@ func (rcv *NodeBlock) ValPtrArrLength() int {
 }
 
 func (rcv *NodeBlock) MutateValPtrArr(j int, n uint16) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(14))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(18))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.MutateUint16(a+flatbuffers.UOffsetT(j*2), n)
@@ -138,7 +164,7 @@ func (rcv *NodeBlock) MutateValPtrArr(j int, n uint16) bool {
 }
 
 func (rcv *NodeBlock) ChildNodeId(j int) uint32 {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(20))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.GetUint32(a + flatbuffers.UOffsetT(j*4))
@@ -147,7 +173,7 @@ func (rcv *NodeBlock) ChildNodeId(j int) uint32 {
 }
 
 func (rcv *NodeBlock) ChildNodeIdLength() int {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(20))
 	if o != 0 {
 		return rcv._tab.VectorLen(o)
 	}
@@ -155,7 +181,7 @@ func (rcv *NodeBlock) ChildNodeIdLength() int {
 }
 
 func (rcv *NodeBlock) MutateChildNodeId(j int, n uint32) bool {
-	o := flatbuffers.UOffsetT(rcv._tab.Offset(16))
+	o := flatbuffers.UOffsetT(rcv._tab.Offset(20))
 	if o != 0 {
 		a := rcv._tab.Vector(o)
 		return rcv._tab.MutateUint32(a+flatbuffers.UOffsetT(j*4), n)
@@ -164,7 +190,7 @@ func (rcv *NodeBlock) MutateChildNodeId(j int, n uint32) bool {
 }
 
 func NodeBlockStart(builder *flatbuffers.Builder) {
-	builder.StartObject(7)
+	builder.StartObject(9)
 }
 func NodeBlockAddIsLeaf(builder *flatbuffers.Builder, isLeaf bool) {
 	builder.PrependBool(isLeaf)
@@ -178,24 +204,32 @@ func NodeBlockAddNkeys(builder *flatbuffers.Builder, nkeys uint16) {
 	builder.PrependUint16(nkeys)
 	builder.Slot(2)
 }
-func NodeBlockAddUnusedMemOffset(builder *flatbuffers.Builder, unusedMemOffset uint16) {
-	builder.PrependUint16(unusedMemOffset)
+func NodeBlockAddActualMemRequired(builder *flatbuffers.Builder, actualMemRequired uint16) {
+	builder.PrependUint16(actualMemRequired)
 	builder.Slot(3)
 }
+func NodeBlockAddUnusedMemStart(builder *flatbuffers.Builder, unusedMemStart uint16) {
+	builder.PrependUint16(unusedMemStart)
+	builder.Slot(4)
+}
+func NodeBlockAddUnusedMemOffset(builder *flatbuffers.Builder, unusedMemOffset uint16) {
+	builder.PrependUint16(unusedMemOffset)
+	builder.Slot(5)
+}
 func NodeBlockAddKeyPtrArr(builder *flatbuffers.Builder, keyPtrArr flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(4, flatbuffers.UOffsetT(keyPtrArr), 0)
+	builder.PrependUOffsetTSlot(6, flatbuffers.UOffsetT(keyPtrArr), 0)
 }
 func NodeBlockStartKeyPtrArrVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(2, numElems, 2)
 }
 func NodeBlockAddValPtrArr(builder *flatbuffers.Builder, valPtrArr flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(5, flatbuffers.UOffsetT(valPtrArr), 0)
+	builder.PrependUOffsetTSlot(7, flatbuffers.UOffsetT(valPtrArr), 0)
 }
 func NodeBlockStartValPtrArrVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(2, numElems, 2)
 }
 func NodeBlockAddChildNodeId(builder *flatbuffers.Builder, childNodeId flatbuffers.UOffsetT) {
-	builder.PrependUOffsetTSlot(6, flatbuffers.UOffsetT(childNodeId), 0)
+	builder.PrependUOffsetTSlot(8, flatbuffers.UOffsetT(childNodeId), 0)
 }
 func NodeBlockStartChildNodeIdVector(builder *flatbuffers.Builder, numElems int) flatbuffers.UOffsetT {
 	return builder.StartVector(4, numElems, 4)

@@ -305,26 +305,30 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 }
 
 func (node *Node) insertKvInPos(i int, key, val []byte) {
-	node.insertKeyInPos(i, key)
-	node.insertValInPos(i, val)
+	sizeKey := node.insertKeyInPos(i, key)
+	sizeVal := node.insertValInPos(i, val)
+	actualMem := *node.ActualMemRequired()
+	node.MutateActualMemRequired(actualMem+sizeKey+sizeVal)
 }
 
-func (node *Node) insertKeyInPos(i int, key []byte) {
-	newKeyOffset := node.appendToFreeMem(key)
+func (node *Node) insertKeyInPos(i int, key []byte) uint16{
+	newKeyOffset, sizeKey := node.appendToFreeMem(key)
 	node.setKeyPtr(i, newKeyOffset)
+	return sizeKey
 }
 
-func (node *Node) insertValInPos(i int, val []byte) {
-	newValOffset := node.appendToFreeMem(val)
+func (node *Node) insertValInPos(i int, val []byte) uint16 {
+	newValOffset, sizeVal := node.appendToFreeMem(val)
 	node.setValPtr(i, newValOffset)
+	return sizeVal
 }
 
-func (node *Node) appendToFreeMem(content []byte) int {
+func (node *Node) appendToFreeMem(content []byte) (contentOffset int, contentSize uint16) {
 	ununsedOffset := int(*node.UnusedMemOffset())
 	freeMemOffset := ununsedOffset + node.blockId*BLOCK_SIZE
 	size := putByteSlice(node.db.mmap[freeMemOffset:], content)
 	node.MutateUnusedMemOffset(uint16(ununsedOffset + size))
-	return freeMemOffset
+	return freeMemOffset, uint16(size)		// TODO: 如果允许超大的value(跨越多个block的)， uint16也许不够表示value的size
 }
 
 func (node *Node) compactMem() {
@@ -351,7 +355,10 @@ func (node *Node) compactMem() {
 func (node *Node) setVal(i int, val []byte) { // update val i
 	// 可以先看val i原先所占的大小够不够，如果够就原地修改，如果不够就新分配空间写入，原来的val i所占的空间变为garbage
 	// 为简化实现，直接append，原先空间作废
-	node.insertValInPos(i, val)
+	sizeOldVal := node.getValSize(i) // TODO
+	sizeNewVal := node.insertValInPos(i, val)
+	actualMem := *node.ActualMemRequired()
+	node.MutateActualMemRequired(actualMem+sizeNewVal-sizeOldVal)
 }
 
 func (db *DB) Delete(key []byte) {
@@ -411,4 +418,9 @@ func getByteSlice(b []byte) []byte {
 	resSlice := make([]byte, slen)
 	copy(resSlice[:slen], b[nbytes:nbytes+int(slen)])
 	return resSlice
+}
+
+func getByteSliceSize(b []byte) int {	// 获取当前存储的byte slice在内存中占用的空间的大小
+	slen, nbytes := binary.Uvarint(b)
+	return nbytes + int(slen)
 }

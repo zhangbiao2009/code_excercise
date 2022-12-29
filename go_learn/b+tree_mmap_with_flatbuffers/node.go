@@ -43,6 +43,12 @@ func (node *Node) getVal(i int) []byte {
 	return getByteSlice(node.db.mmap[valOffset:])
 }
 
+func (node *Node) getValSize(i int) uint16 {		// 返回val在block内存中占用的空间大小
+	valOffset := node.getValPtr(i)
+	sz := getByteSliceSize(node.db.mmap[valOffset:])
+	return uint16(sz)
+}
+
 func (node *Node) getKeyPtr(i int) int {
 	return int(node.KeyPtrArr(i)) + node.blockId*BLOCK_SIZE
 }
@@ -139,6 +145,7 @@ func newNodeBlock(outputBuf []byte, degree int, isLeaf bool) *utils.NodeBlock {
 	} else {
 		utils.NodeBlockAddChildNodeId(builder, childBlockIdArr)
 	}
+	utils.NodeBlockAddActualMemRequired(builder, 0)
 	utils.NodeBlockAddUnusedMemStart(builder, 0)
 	utils.NodeBlockAddUnusedMemOffset(builder, 0)
 	builder.Finish(utils.NodeBlockEnd(builder))
