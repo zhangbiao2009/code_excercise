@@ -37,6 +37,34 @@ func TestDBInsert(t *testing.T) {
 	}
 }
 
+func TestDBUpdate(t *testing.T) {
+	createDB(5)
+	key := []byte("key1")
+	val := []byte("val1")
+	if err := db.Insert(key, val); err != nil {
+		t.Error(err)
+	}
+	valRead, err := db.Find(key)
+	if err != nil {
+		t.Error(err)
+	}
+	if bytes.Compare(val, valRead) != 0 {
+		t.Error("val not equal")
+	}
+
+	newVal := []byte("newval1")
+	if err := db.Insert(key, newVal); err != nil {
+		t.Error(err)
+	}
+	valRead, err = db.Find(key)
+	if err != nil {
+		t.Error(err)
+	}
+	if bytes.Compare(newVal, valRead) != 0 {
+		t.Error("val not equal")
+	}
+}
+
 func TestDBInsert2(t *testing.T) {
 	db, err := OpenDB(dbFilePath)
 	if err != nil {

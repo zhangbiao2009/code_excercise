@@ -267,7 +267,7 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 		k := node.getKey(i)
 		cmp := bytes.Compare(key, k)
 		if cmp == 0 { // key already exists, update value only
-			//node.setVal(i, val)
+			node.setVal(i, val)
 			return
 		}
 		if cmp < 0 {
@@ -351,6 +351,7 @@ func (node *Node) compactMem() {
 func (node *Node) setVal(i int, val []byte) { // update val i
 	// 可以先看val i原先所占的大小够不够，如果够就原地修改，如果不够就新分配空间写入，原来的val i所占的空间变为garbage
 	// 为简化实现，直接append，原先空间作废
+	node.insertValInPos(i, val)
 }
 
 func (db *DB) Delete(key []byte) {
