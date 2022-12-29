@@ -1,0 +1,10 @@
+namespace utils;
+
+table MetaBlock {
+    degree:uint32 = null (id : 0);      // B+tree的degree
+    root_block_id:uint32 = null (id : 1);   // root节点的block id
+    nkeys:uint64 = null (id : 2);       // 这颗B+tree总共有多少个key
+    nused_blocks:int32 = null (id : 3); // 目前用了多少个block，分配新的block时需要
+}
+
+root_type MetaBlock;
