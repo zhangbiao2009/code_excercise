@@ -54,10 +54,10 @@ func (node *Node) getKeyPtr(i int) int {
 }
 
 func (node *Node) setKeyPtr(i int, val int) {
-	node.MutateKeyPtrArr(i, uint16(val-node.blockId*BLOCK_SIZE))
+	node.MutateKeyPtrArr(i, uint16(val-node.blockId*BLOCK_SIZE))	// 存储相对于本block开始的偏移量
 }
 func (node *Node) clearKeyPtr(i int) {
-	node.setKeyPtr(i, 0)
+	node.setKeyPtr(i, node.blockId*BLOCK_SIZE)		// 这样达到最终keyPtrArr[i] = 0的效果
 }
 
 func (node *Node) getValPtr(i int) int {
@@ -65,11 +65,11 @@ func (node *Node) getValPtr(i int) int {
 }
 
 func (node *Node) setValPtr(i int, val int) {
-	node.MutateValPtrArr(i, uint16(val-node.blockId*BLOCK_SIZE))
+	node.MutateValPtrArr(i, uint16(val-node.blockId*BLOCK_SIZE)) 	// 存储相对于本block开始的偏移量
 }
 
 func (node *Node) clearValPtr(i int) {
-	node.setValPtr(i, 0)
+	node.setValPtr(i, node.blockId*BLOCK_SIZE)
 }
 
 func (node *Node) getChildBlockId(i int) int {

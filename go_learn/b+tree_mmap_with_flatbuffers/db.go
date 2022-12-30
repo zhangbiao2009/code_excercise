@@ -267,8 +267,8 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 		k := node.getKey(i)
 		cmp := bytes.Compare(key, k)
 		if cmp == 0 { // key already exists, update value only
-			node.setVal(i, val)
-			return
+			err := node.setVal(i, val)
+			return nil, nil, err
 		}
 		if cmp < 0 {
 			break
@@ -304,23 +304,35 @@ func (node *Node) insertKVInLeaf(key, val []byte) (promotedKey []byte, newSiblin
 	return nil, nil, nil
 }
 
-func (node *Node) insertKvInPos(i int, key, val []byte) {
-	sizeKey := node.insertKeyInPos(i, key)
-	sizeVal := node.insertValInPos(i, val)
+func (node *Node) insertKvInPos(i int, key, val []byte) error {
+	sizeKey := calcReuqiredMemSerialized(key)
+	sizeVal := calcReuqiredMemSerialized(val)
+	if err := node.spaceIsEnough(sizeKey + sizeVal); err != nil {
+		return err
+	}
+	node.insertKeyInPos(i, key)
+	_, err := node.insertValInPos(i, val) // TODO: 前面检查内存够不够了，这里是不是可以不检查了
 	actualMem := *node.ActualMemRequired()
-	node.MutateActualMemRequired(actualMem+sizeKey+sizeVal)
+	node.MutateActualMemRequired(actualMem + uint16(sizeKey+sizeVal))
+	return err
 }
 
-func (node *Node) insertKeyInPos(i int, key []byte) uint16{
+// TODO: insertKeyInPos一定能成功，所以需要根据最大key size预留足够的空间
+func (node *Node) insertKeyInPos(i int, key []byte) uint16 {
 	newKeyOffset, sizeKey := node.appendToFreeMem(key)
 	node.setKeyPtr(i, newKeyOffset)
 	return sizeKey
 }
 
-func (node *Node) insertValInPos(i int, val []byte) uint16 {
-	newValOffset, sizeVal := node.appendToFreeMem(val)
+func (node *Node) insertValInPos(i int, val []byte) (uint16, error) {
+	sizeVal := calcReuqiredMemSerialized(val)
+	err := node.spaceIsEnough(sizeVal)
+	if err != nil {
+		return 0, err
+	}
+	newValOffset, _ := node.appendToFreeMem(val)
 	node.setValPtr(i, newValOffset)
-	return sizeVal
+	return uint16(sizeVal), nil
 }
 
 func (node *Node) appendToFreeMem(content []byte) (contentOffset int, contentSize uint16) {
@@ -328,7 +340,33 @@ func (node *Node) appendToFreeMem(content []byte) (contentOffset int, contentSiz
 	freeMemOffset := ununsedOffset + node.blockId*BLOCK_SIZE
 	size := putByteSlice(node.db.mmap[freeMemOffset:], content)
 	node.MutateUnusedMemOffset(uint16(ununsedOffset + size))
-	return freeMemOffset, uint16(size)		// TODO: 如果允许超大的value(跨越多个block的)， uint16也许不够表示value的size
+	return freeMemOffset, uint16(size) // TODO: 如果允许超大的value(跨越多个block的)， uint16也许不够表示value的size
+}
+
+/*
+检查剩余空间是否能容纳valSize大小的数据，如果可以直接返回；如果不行先计算compact后能不能容纳下，
+如果可以compact后返回，如果不行返回error
+暂时先这么做，后续策略可允许value有overflow blocks；
+*/
+func (node *Node) spaceIsEnough(valSize int) error {
+	ununsedOffset := int(*node.UnusedMemOffset())
+	if BLOCK_SIZE-ununsedOffset >= valSize { // 空间够
+		return nil
+	}
+	err := errors.New("not enough memory in this block")
+	if !node.isLeaf() {
+		return err
+	}
+	// node is leaf
+	actualMem := *node.ActualMemRequired()
+	memAvailable := BLOCK_SIZE - *node.UnusedMemStart() - actualMem
+
+	if memAvailable >= uint16(valSize) { // 压缩后空间够
+		node.compactMem()
+		return nil
+	}
+
+	return err // 压缩后也不够
 }
 
 func (node *Node) compactMem() {
@@ -338,11 +376,11 @@ func (node *Node) compactMem() {
 	for i := 0; i < node.nKeys(); i++ {
 		key := node.getKey(i)
 		size := putByteSlice(tmpMem[start:], key)
-		node.MutateKeyPtrArr(i, uint16(unusedMemStart+start))	// 更新key的偏移量
+		node.MutateKeyPtrArr(i, uint16(unusedMemStart+start)) // 更新key的偏移量
 		start += size
 		if node.isLeaf() {
 			val := node.getVal(i)
-			size = putByteSlice(tmpMem[start:], val)	// 更新val的偏移量
+			size = putByteSlice(tmpMem[start:], val) // 更新val的偏移量
 			node.MutateValPtrArr(i, uint16(unusedMemStart+start))
 			start += size
 		}
@@ -352,13 +390,17 @@ func (node *Node) compactMem() {
 	node.MutateUnusedMemOffset(uint16(unusedMemStart + start))
 }
 
-func (node *Node) setVal(i int, val []byte) { // update val i
+func (node *Node) setVal(i int, val []byte) error { // update val i
 	// 可以先看val i原先所占的大小够不够，如果够就原地修改，如果不够就新分配空间写入，原来的val i所占的空间变为garbage
 	// 为简化实现，直接append，原先空间作废
-	sizeOldVal := node.getValSize(i) // TODO
-	sizeNewVal := node.insertValInPos(i, val)
+	sizeOldVal := node.getValSize(i)
+	sizeNewVal, err := node.insertValInPos(i, val)
+	if err != nil {
+		return err
+	}
 	actualMem := *node.ActualMemRequired()
-	node.MutateActualMemRequired(actualMem+sizeNewVal-sizeOldVal)
+	node.MutateActualMemRequired(actualMem + sizeNewVal - sizeOldVal)
+	return nil
 }
 
 func (db *DB) Delete(key []byte) {
@@ -413,6 +455,7 @@ func putByteSlice(b, s []byte) int {
 	return nbytes + len(s)
 }
 
+// 从序列化好的内存中读取一个byte slice出来
 func getByteSlice(b []byte) []byte {
 	slen, nbytes := binary.Uvarint(b)
 	resSlice := make([]byte, slen)
@@ -420,7 +463,14 @@ func getByteSlice(b []byte) []byte {
 	return resSlice
 }
 
-func getByteSliceSize(b []byte) int {	// 获取当前存储的byte slice在内存中占用的空间的大小
+func getByteSliceSize(b []byte) int { // 获取当前存储在内存中的byte slice占用的空间的大小
 	slen, nbytes := binary.Uvarint(b)
+	return nbytes + int(slen)
+}
+
+func calcReuqiredMemSerialized(s []byte) int { // 计算s序列化后需要占用的空间的大小
+	b := make([]byte, 10) // varint 最多需要10个字节
+	slen := uint64(len(s))
+	nbytes := binary.PutUvarint(b, slen)
 	return nbytes + int(slen)
 }
