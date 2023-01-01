@@ -38,6 +38,12 @@ func (node *Node) getKey(i int) []byte {
 	return getByteSlice(node.db.mmap[keyOffset:])
 }
 
+func (node *Node) getKeySize(i int) uint16 {		// 返回key在block内存中占用的空间大小
+	keyOffset := node.getKeyPtr(i)
+	sz := getByteSliceSize(node.db.mmap[keyOffset:])
+	return uint16(sz)
+}
+
 func (node *Node) getVal(i int) []byte {
 	valOffset := node.getValPtr(i)
 	return getByteSlice(node.db.mmap[valOffset:])
@@ -100,11 +106,11 @@ func newInternalNode(db *DB) *Node {
 }
 
 func newNode(db *DB, isLeaf bool) *Node {
-	blockId, start := db.newBlock()
+	blockId, start := db.blockMgr.newBlock()
 	nodeBlock := newNodeBlock(db.mmap[start:], int(*db.metaBlock.Degree()), isLeaf)
 	return &Node{
 		db:        db,
-		blockId:   blockId,
+		blockId:   int(blockId),
 		metaBlock: db.metaBlock,
 		NodeBlock: nodeBlock,
 	}
@@ -142,10 +148,10 @@ func newNodeBlock(outputBuf []byte, degree int, isLeaf bool) *utils.NodeBlock {
 	utils.NodeBlockAddKeyPtrArr(builder, keyPtrArr)
 	if isLeaf {
 		utils.NodeBlockAddValPtrArr(builder, valPtrArr)
-		utils.NodeBlockAddActualMemRequired(builder, 0)		// only leaf node needs this
 	} else {
 		utils.NodeBlockAddChildNodeId(builder, childBlockIdArr)
 	}
+	utils.NodeBlockAddActualMemRequired(builder, 0)
 	utils.NodeBlockAddUnusedMemStart(builder, 0)
 	utils.NodeBlockAddUnusedMemOffset(builder, 0)
 	builder.Finish(utils.NodeBlockEnd(builder))

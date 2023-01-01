@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"os"
 	"sort"
 	"testing"
 )
@@ -151,6 +152,88 @@ func TestDBInsertSplit(t *testing.T) {
 	   		t.Error("val not equal")
 	   	}
 	*/
+}
+
+func TestDBDelete(t *testing.T) {
+	createDB(5)
+	m := map[string]string{
+		"key1": "val1",
+		"key2": "val2",
+		"key3": "val3",
+		"key4": "val4",
+		"key5": "val5",
+	}
+	for k, v := range m {
+		key := []byte(k)
+		val := []byte(v)
+		if err := db.Insert(key, val); err != nil {
+			t.Errorf("key: %s, err: %v", k, err)
+		}
+		fmt.Fprintf(os.Stderr, "after insert, k: %s, v: %s\n", k, v)
+		db.PrintDebugInfo()
+	}
+	if err := db.Insert([]byte("key0"), []byte("val0")); err != nil {
+		t.Errorf("key: key0, err: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "after insert, key0, val0\n")
+	db.PrintDebugInfo()
+	for k := range m {
+		key := []byte(k)
+		db.Delete(key)
+		_, err := db.Find(key)
+		if err != ERR_KEY_NOT_EXIST {
+			t.Fatalf("key: %s, err: %v", k, err)
+		}
+
+		fmt.Fprintf(os.Stderr, "after delete, k: %s\n", k)
+		db.PrintDebugInfo()
+	}
+	//db.PrintDotGraph2("mydb.dot")
+}
+
+func TestBTreeDelete2(t *testing.T) {
+	createDB(5)
+	intSlice := getUniqueInts(3386)
+	for i, num := range intSlice {
+		_ = i
+		key := fmt.Sprintf("k%d", num)
+		val := fmt.Sprintf("v%d", num)
+		db.Insert([]byte(key), []byte(val))
+	}
+	rand.Shuffle(len(intSlice), func(i, j int) { intSlice[i], intSlice[j] = intSlice[j], intSlice[i] })
+	//db.PrintDotGraph2("mydb.dot")
+	checkMemRequired := func(node *Node) bool {
+		actualMemRequred := *node.ActualMemRequired()
+		expectActualMemRequred := uint16(0)
+		for i := 0; i < node.nKeys(); i++ {
+			expectActualMemRequred += node.getKeySize(i)
+		}
+		if node.isLeaf() {
+			for i := 0; i < node.nKeys(); i++ {
+				expectActualMemRequred += node.getValSize(i)
+			}
+		}
+		if expectActualMemRequred != actualMemRequred {
+			t.Fatalf("error not equal: actualMemRequred: %d, expectActualMemRequred: %d\n", actualMemRequred, expectActualMemRequred)
+			t.FailNow()
+			return true
+		}
+		return false
+	}
+	for i, ri := range intSlice {
+		_ = i
+		randKey := fmt.Sprintf("k%d", ri)
+		db.Delete([]byte(randKey))
+		//fmt.Fprintf(os.Stderr, "i: %d, after delete key: %s\n", i, randKey)
+		//db.PrintDebugInfo()
+		db.Traverse(checkMemRequired) 
+		_, err := db.Find([]byte(randKey))
+		if err != ERR_KEY_NOT_EXIST {
+			t.Fatalf("key: %s, err: %v", randKey, err)
+		}
+		db.Traverse(checkMemRequired)
+	}
+	db.PrintDebugInfo()
 }
 
 func getUniqueInts(n int) []int {

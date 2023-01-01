@@ -4,7 +4,7 @@ table NodeBlock {
     is_leaf:bool = null (id:0);     // 是否是叶子节点
     padding:byte = null (id:1);     // padding，作用待定
     nkeys:uint16 = null (id:2);     // 这个node当前有多少个key
-    actual_mem_required:uint16 = null (id:3);   // 当前node上的key和val实际需要多少空间，用来计算compact能回收多少空间，只有叶子节点有
+    actual_mem_required:uint16 = null (id:3);   // 当前node上的key和val实际需要多少空间，用来计算compact能回收多少空间
     unused_mem_start:uint16 = null (id:4);     // 当前block的空闲空间初始偏移量，不会修改，compact内存时会用
     unused_mem_offset:uint16 = null (id:5);     // 当前block的空闲空间偏移量，初始值和unused_mem_start相同，插入或修改数据会用
     key_ptr_arr:[uint16] (id:6);        // 预先分配的key指针数组，每个key指针两个字节, 存key实际数据的偏移量
